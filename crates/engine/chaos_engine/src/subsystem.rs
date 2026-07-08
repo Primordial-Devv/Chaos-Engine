@@ -18,5 +18,7 @@ pub trait Subsystem {
 
     fn update(&mut self, _context: &mut EngineContext) {}
 
+    fn render(&mut self, _context: &mut EngineContext) {}
+
     fn shutdown(&mut self, _context: &mut EngineContext) {}
 }

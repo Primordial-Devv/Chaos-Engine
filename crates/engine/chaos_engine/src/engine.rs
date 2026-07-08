@@ -6,6 +6,7 @@ use log::{debug, error, info, trace};
 
 use crate::config::EngineConfig;
 use crate::context::EngineContext;
+use crate::render_subsystem::RenderSubsystem;
 use crate::subsystem::Subsystem;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +105,10 @@ impl WindowEventHandler for Engine {
             "window ready: {width}x{height} (scale factor {})",
             window.scale_factor()
         );
+        self.subsystems.push(Box::new(RenderSubsystem::new(
+            window.clone(),
+            self.config.clear_color,
+        )));
         self.window = Some(window);
         self.start();
     }
@@ -120,7 +125,7 @@ impl WindowEventHandler for Engine {
     }
 
     fn on_update(&mut self) {
-        if self.state != EngineState::Running {
+        if self.state != EngineState::Running || self.context.exit_requested() {
             return;
         }
         let frame_started = Instant::now();
@@ -137,6 +142,18 @@ impl WindowEventHandler for Engine {
         }
         if !self.context.exit_requested() {
             self.pace_frame(frame_started);
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+    }
+
+    fn on_redraw(&mut self) {
+        if self.state != EngineState::Running || self.context.exit_requested() {
+            return;
+        }
+        for subsystem in &mut self.subsystems[..self.initialized] {
+            subsystem.render(&mut self.context);
         }
     }
 
@@ -231,6 +248,10 @@ mod tests {
             ));
         }
 
+        fn render(&mut self, _context: &mut EngineContext) {
+            self.journal.push(format!("render {}", self.name));
+        }
+
         fn shutdown(&mut self, _context: &mut EngineContext) {
             self.journal.push(format!("shutdown {}", self.name));
         }
@@ -311,6 +332,26 @@ mod tests {
         assert!(engine.init_error.is_some());
         engine.on_shutdown();
         assert_eq!(journal.entries(), vec!["init a", "init b", "shutdown a"]);
+    }
+
+    #[test]
+    fn render_runs_after_update() {
+        let journal = Journal::default();
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Probe::boxed("a", &journal));
+        engine.start();
+        engine.on_update();
+        engine.on_redraw();
+        assert_eq!(journal.entries(), vec!["init a", "update a 1", "render a"]);
+    }
+
+    #[test]
+    fn redraw_before_start_is_ignored() {
+        let journal = Journal::default();
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Probe::boxed("a", &journal));
+        engine.on_redraw();
+        assert!(journal.entries().is_empty());
     }
 
     #[test]
