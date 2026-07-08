@@ -1,0 +1,16 @@
+[package]
+name = "chaos_runtime"
+description = "Plateforme sandbox au-dessus de l'engine : implémente chaos_api, héberge le scripting, gère serveurs, gamemodes et contenu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_core.workspace = true
+chaos_engine.workspace = true
+chaos_api.workspace = true
+chaos_scripting.workspace = true
+
+[lints]
+workspace = true

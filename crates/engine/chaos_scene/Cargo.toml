@@ -1,0 +1,14 @@
+[package]
+name = "chaos_scene"
+description = "Scènes et hiérarchie, bâties sur l'ECS"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_core.workspace = true
+chaos_ecs.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "sandbox"
+description = "Client de test de la plateforme"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_runtime.workspace = true
+
+[lints]
+workspace = true

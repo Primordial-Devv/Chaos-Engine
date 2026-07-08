@@ -1,0 +1,13 @@
+[package]
+name = "chaos_assets"
+description = "Asset manager et pipeline d'import"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_core.workspace = true
+
+[lints]
+workspace = true

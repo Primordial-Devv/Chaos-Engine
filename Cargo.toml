@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/foundation/*",
+    "crates/engine/*",
+    "crates/platform/*",
+    "crates/tools/*",
+    "apps/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+
+[workspace.dependencies]
+chaos_core = { path = "crates/foundation/chaos_core" }
+chaos_engine = { path = "crates/engine/chaos_engine" }
+chaos_window = { path = "crates/engine/chaos_window" }
+chaos_renderer = { path = "crates/engine/chaos_renderer" }
+chaos_ecs = { path = "crates/engine/chaos_ecs" }
+chaos_scene = { path = "crates/engine/chaos_scene" }
+chaos_assets = { path = "crates/engine/chaos_assets" }
+chaos_physics = { path = "crates/engine/chaos_physics" }
+chaos_audio = { path = "crates/engine/chaos_audio" }
+chaos_network = { path = "crates/engine/chaos_network" }
+chaos_api = { path = "crates/platform/chaos_api" }
+chaos_scripting = { path = "crates/platform/chaos_scripting" }
+chaos_runtime = { path = "crates/platform/chaos_runtime" }
+chaos_tools = { path = "crates/tools/chaos_tools" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"

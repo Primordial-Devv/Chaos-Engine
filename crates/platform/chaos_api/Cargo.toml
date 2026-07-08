@@ -1,0 +1,13 @@
+[package]
+name = "chaos_api"
+description = "Contrat d'API public stable exposé aux gamemodes, scripts et serveurs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_core.workspace = true
+
+[lints]
+workspace = true

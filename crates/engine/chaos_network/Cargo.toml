@@ -1,0 +1,13 @@
+[package]
+name = "chaos_network"
+description = "Transport réseau et réplication bas niveau"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_core.workspace = true
+
+[lints]
+workspace = true

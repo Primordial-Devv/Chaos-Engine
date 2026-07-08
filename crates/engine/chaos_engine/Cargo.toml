@@ -1,0 +1,21 @@
+[package]
+name = "chaos_engine"
+description = "Façade de l'engine : assemble et orchestre les sous-systèmes privés"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chaos_core.workspace = true
+chaos_window.workspace = true
+chaos_renderer.workspace = true
+chaos_ecs.workspace = true
+chaos_scene.workspace = true
+chaos_assets.workspace = true
+chaos_physics.workspace = true
+chaos_audio.workspace = true
+chaos_network.workspace = true
+
+[lints]
+workspace = true
