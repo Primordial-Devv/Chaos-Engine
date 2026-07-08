@@ -32,6 +32,10 @@ Flux de dépendances strictement descendant : `apps → platform → engine → 
 | `examples/` | Futurs exemples d'utilisation |
 | `tests/` | Tests globaux (intégration, assets, réseau, modding) |
 
+## Versioning
+
+Version technique `MAJOR.MINOR.PATCH(+BUILD)` (SemVer), nom public `Chaos N` où `N` = MAJOR. Source de vérité unique : `[workspace.package].version` dans le `Cargo.toml` racine. Convention complète dans `docs/versioning.md`.
+
 ## Commandes
 
 ```sh
