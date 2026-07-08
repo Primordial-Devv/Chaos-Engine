@@ -25,4 +25,4 @@
 
 ## CI
 
-Le workflow `.github/workflows/ci.yml` exécute `cargo check`, `cargo fmt --check` et `cargo clippy --all-targets --all-features -- -D warnings` sur chaque PR vers `dev`/`main` et chaque push sur `dev`/`main`. L'événement PR re-testant chaque push de la branche de travail, aucun déclencheur supplémentaire n'est nécessaire sur les branches de travail.
+Le workflow `.github/workflows/ci.yml` exécute `cargo check`, `cargo fmt --check` et `cargo clippy --all-targets --all-features -- -D warnings` sur **chaque push de n'importe quelle branche** (retour immédiat dès le premier push, avant même d'ouvrir une PR) et sur chaque PR vers `dev`/`main` (validation du résultat du merge). Quand une PR est ouverte, un push déclenche donc les deux — le repo étant public, les minutes Actions sont gratuites.
