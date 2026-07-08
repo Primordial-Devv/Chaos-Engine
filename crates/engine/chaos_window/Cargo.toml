@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 chaos_core.workspace = true
+log.workspace = true
+winit.workspace = true
 
 [lints]
 workspace = true

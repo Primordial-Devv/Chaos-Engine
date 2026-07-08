@@ -29,6 +29,9 @@ chaos_api = { path = "crates/platform/chaos_api" }
 chaos_scripting = { path = "crates/platform/chaos_scripting" }
 chaos_runtime = { path = "crates/platform/chaos_runtime" }
 chaos_tools = { path = "crates/tools/chaos_tools" }
+env_logger = "0.11"
+log = "0.4"
+winit = "0.30"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
