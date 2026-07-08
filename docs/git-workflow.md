@@ -25,12 +25,13 @@
 
 ## Protections GitHub
 
-Le repo étant privé sur un plan GitHub Free, GitHub refuse l'activation des rulesets/protections de branches (réservés aux repos publics ou aux plans Pro et supérieurs). Les règles de ce document valent donc discipline d'équipe, renforcée par deux garde-fous :
+Le ruleset `protect-main-dev` est actif sur `main` et `dev` (repo public) :
 
-- Hook local `.githooks/pre-push` qui refuse tout push direct vers `main` et `dev`. À activer une fois par clone : `git config core.hooksPath .githooks`.
-- La CI s'affiche sur chaque PR ; ne jamais merger une PR dont les checks sont rouges.
+- PR obligatoire — aucun push direct possible ; résolution des conversations exigée ; méthodes de merge autorisées : squash et merge commit.
+- Checks `check`, `fmt`, `clippy` requis et branche à jour avec sa cible exigée avant merge.
+- Force-push et suppression de branche bloqués. Aucun acteur de bypass.
 
-Le jour où le repo passe sur GitHub Pro (ou devient public), activer le ruleset complet : PR obligatoire, checks `check`/`fmt`/`clippy` requis, branche à jour exigée, force-push et suppressions bloqués sur `main` + `dev` — via Settings → Rules → Rulesets, ou en relançant la création API (`gh api -X POST repos/…/rulesets`).
+En complément, le hook local `.githooks/pre-push` refuse les push directs vers `main`/`dev` avant même d'atteindre GitHub. À activer une fois par clone : `git config core.hooksPath .githooks`.
 
 ## CI
 
