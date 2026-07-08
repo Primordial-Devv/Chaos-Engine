@@ -60,7 +60,8 @@ impl Engine {
     }
 
     /// Démarre le moteur et bloque jusqu'à l'arrêt propre.
-    /// Doit être appelé depuis le main thread.
+    /// Doit être appelé depuis le main thread, une seule fois par processus :
+    /// les OS ne permettent pas de recréer la boucle d'événements.
     pub fn run(&mut self) -> ChaosResult<()> {
         info!(
             "{} starting (Chaos Engine {})",
@@ -87,6 +88,7 @@ impl Engine {
             }
             self.initialized = index + 1;
         }
+        self.clock = FrameClock::new();
         self.state = EngineState::Running;
         info!("engine running ({} subsystem(s))", self.subsystems.len());
     }
