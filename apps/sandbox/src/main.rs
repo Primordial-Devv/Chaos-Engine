@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use chaos_engine::{Engine, EngineConfig, WindowConfig};
+use chaos_engine::{Color, Engine, EngineConfig, WindowConfig};
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -14,6 +14,7 @@ fn main() -> ExitCode {
         frame_limit: std::env::var("CHAOS_FRAME_LIMIT")
             .ok()
             .and_then(|value| value.parse().ok()),
+        clear_color: Color::rgb(0.10, 0.03, 0.18),
         ..EngineConfig::default()
     };
 
