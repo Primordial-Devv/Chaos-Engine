@@ -16,6 +16,7 @@ chaos_assets.workspace = true
 chaos_physics.workspace = true
 chaos_audio.workspace = true
 chaos_network.workspace = true
+log.workspace = true
 
 [lints]
 workspace = true
