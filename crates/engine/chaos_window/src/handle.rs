@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
+use raw_window_handle::{
+    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle as RawWindowHandle,
+};
 use winit::window::Window;
 
 /// Poignée opaque sur la fenêtre native, seul accès exposé hors de la crate.
-/// Portera les raw handles nécessaires au renderer dans une phase ultérieure.
+/// Expose les handles natifs standard (raw-window-handle) pour que le renderer
+/// puisse créer sa surface sans dépendre de cette crate.
 #[derive(Debug, Clone)]
 pub struct WindowHandle {
     window: Arc<Window>,
@@ -29,5 +33,17 @@ impl WindowHandle {
 
     pub fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+}
+
+impl HasWindowHandle for WindowHandle {
+    fn window_handle(&self) -> Result<RawWindowHandle<'_>, HandleError> {
+        self.window.window_handle()
+    }
+}
+
+impl HasDisplayHandle for WindowHandle {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        self.window.display_handle()
     }
 }

@@ -20,6 +20,7 @@ pub trait WindowEventHandler {
     fn on_window_ready(&mut self, window: WindowHandle);
     fn on_event(&mut self, event: Event);
     fn on_update(&mut self);
+    fn on_redraw(&mut self);
     fn exit_requested(&self) -> bool;
     fn on_shutdown(&mut self);
 }
@@ -94,7 +95,9 @@ impl ApplicationHandler for WinitApp<'_> {
         _window_id: WindowId,
         event: WinitWindowEvent,
     ) {
-        if let Some(translated) = translate_window_event(&event) {
+        if let WinitWindowEvent::RedrawRequested = event {
+            self.handler.on_redraw();
+        } else if let Some(translated) = translate_window_event(&event) {
             self.handler.on_event(translated);
         }
         if self.handler.exit_requested() {
