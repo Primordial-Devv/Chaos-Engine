@@ -46,4 +46,11 @@ cargo clippy --workspace --all-targets
 
 ## Statut
 
-Squelette de workspace uniquement : architecture, graphe de dépendances et documentation. Aucune fonctionnalité moteur n'est implémentée, aucune dépendance externe n'est ajoutée.
+Phase 1 terminée : le moteur démarre, ouvre une fenêtre native (Windows/macOS via winit), reçoit les événements système et les entrées clavier/souris, exécute une boucle stable avec horloge de frame bornée, et s'arrête proprement (subsystems arrêtés en ordre inverse). Architecture de la boucle : `docs/architecture/engine-loop.md`.
+
+```sh
+cargo run -p sandbox
+CHAOS_FRAME_LIMIT=180 cargo run -p sandbox
+```
+
+Prochaines phases : renderer, ECS, scènes, assets, physique, audio, réseau, runtime/plateforme.
