@@ -6,6 +6,7 @@ use std::fmt;
 pub enum ChaosError {
     Window(String),
     Engine(String),
+    Graphics(String),
 }
 
 pub type ChaosResult<T> = Result<T, ChaosError>;
@@ -15,6 +16,7 @@ impl fmt::Display for ChaosError {
         match self {
             Self::Window(message) => write!(f, "window error: {message}"),
             Self::Engine(message) => write!(f, "engine error: {message}"),
+            Self::Graphics(message) => write!(f, "graphics error: {message}"),
         }
     }
 }
