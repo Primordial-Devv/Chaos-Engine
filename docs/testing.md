@@ -1,6 +1,6 @@
 # Tests du moteur
 
-Tout se lance depuis la racine du workspace. Ce document couvre la phase 1 (cycle de vie, fenêtre, événements, boucle) et s'étoffera à chaque phase.
+Tout se lance depuis la racine du workspace. Ce document couvre les phases 1 (cycle de vie, fenêtre, événements, boucle) et 2 (renderer minimal) et s'étoffera à chaque phase.
 
 ## 1. Tests unitaires
 
@@ -10,9 +10,12 @@ cargo test --workspace
 
 | Crate | Tests | Ce qui est vérifié |
 |---|---|---|
-| `chaos_core` | 3 | Avance de l'horloge de frame, delta borné à 250 ms, horloge figée → delta zéro |
+| `chaos_core` | 5 | Avance de l'horloge de frame, delta borné à 250 ms, horloge figée → delta zéro, Color (rgb opaque, défaut noir) |
 | `chaos_window` | 4 | Traduction winit → types maison : touches, boutons, états, fallback `Unknown` |
-| `chaos_engine` | 6 | Init dans l'ordre / shutdown en ordre inverse, `CloseRequested` → exit, dispatch des événements aux subsystems, `frame_limit`, échec d'init (seuls les subsystems initialisés sont arrêtés), update ignoré avant démarrage |
+| `chaos_engine` | 8 | Init dans l'ordre / shutdown en ordre inverse, `CloseRequested` → exit, dispatch des événements aux subsystems, `frame_limit`, échec d'init (seuls les subsystems initialisés sont arrêtés), update/redraw ignorés avant démarrage, séquence update → render |
+
+Les tests unitaires ne touchent jamais le GPU (la CI n'en a pas) : la validation
+GPU est locale, via les runs sandbox ci-dessous.
 
 Cibler une crate et voir le nom de chaque test :
 
@@ -31,7 +34,9 @@ La fenêtre s'ouvre, le moteur tourne 180 frames (~3 s à 60 fps) puis s'arrête
 ```
 INFO  Chaos Sandbox starting (Chaos Engine 0.1.0)
 INFO  window ready: <w>x<h> (scale factor <n>)
-INFO  engine running (0 subsystem(s))
+INFO  graphics adapter selected: wgpu (<GPU> / <Backend>)
+INFO  renderer ready: wgpu (<GPU> / <Backend>)
+INFO  engine running (1 subsystem(s))
 INFO  frame limit reached (180), requesting exit
 INFO  engine shutting down
 INFO  engine stopped
@@ -39,6 +44,10 @@ INFO  Chaos Sandbox stopped cleanly
 ```
 
 Le code de sortie doit être `0` (`echo $?` juste après).
+
+La fenêtre doit afficher la couleur de fond du sandbox (violet sombre), rendue
+par le GPU. Le log `renderer released` doit apparaître au shutdown, avant
+`engine stopped`.
 
 ## 3. Test interactif du cycle de vie
 

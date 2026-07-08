@@ -25,16 +25,25 @@ Aucun type winit ne sort de `chaos_window`. Les événements sont traduits à la
 Engine::run()
   └─ run_event_loop()                        boucle OS démarrée
        ├─ on_window_ready(WindowHandle)      fenêtre native créée
+       │    ├─ enregistrement du RenderSubsystem (en dernier)
        │    └─ init des subsystems           dans l'ordre d'enregistrement
        ├─ on_event(Event)                    système + entrées, traduits
        │    └─ CloseRequested → request_exit
-       ├─ on_update()                        chaque frame :
+       ├─ on_update()                        chaque frame (about_to_wait) :
        │    ├─ FrameClock::tick()            delta borné (max 250 ms)
-       │    ├─ update de chaque subsystem
+       │    ├─ update de chaque subsystem    phase simulation
        │    ├─ frame_limit éventuel
-       │    └─ pacing processeur             si target_fps est défini
+       │    ├─ pacing processeur             si target_fps est défini
+       │    └─ request_redraw()
+       ├─ on_redraw()                        sur RedrawRequested :
+       │    └─ render de chaque subsystem    phase présentation
        └─ on_shutdown()                      subsystems arrêtés en ordre INVERSE
 ```
+
+La séparation update/render suit le modèle winit : la simulation vit dans
+`about_to_wait`, la présentation dans `RedrawRequested` — ce qui garde le rendu
+fluide pendant le resize interactif macOS (boucle modale). Détails du renderer :
+`docs/renderer/overview.md`.
 
 États : `Created → Running → Stopped`. Un échec d'init d'un subsystem interrompt le démarrage, n'arrête que les subsystems déjà initialisés (ordre inverse) et fait remonter l'erreur par `Engine::run()`.
 
@@ -48,6 +57,7 @@ pub trait Subsystem {
     fn init(&mut self, context: &mut EngineContext) -> ChaosResult<()>;
     fn on_event(&mut self, event: &Event, context: &mut EngineContext);
     fn update(&mut self, context: &mut EngineContext);
+    fn render(&mut self, context: &mut EngineContext);
     fn shutdown(&mut self, context: &mut EngineContext);
 }
 ```

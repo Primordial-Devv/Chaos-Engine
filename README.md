@@ -46,7 +46,7 @@ cargo clippy --workspace --all-targets
 
 ## Statut
 
-Phase 1 terminée : le moteur démarre, ouvre une fenêtre native (Windows/macOS via winit), reçoit les événements système et les entrées clavier/souris, exécute une boucle stable avec horloge de frame bornée, et s'arrête proprement (subsystems arrêtés en ordre inverse). Architecture de la boucle : `docs/architecture/engine-loop.md`.
+Phase 2 terminée : le moteur démarre, ouvre une fenêtre native (Windows/macOS via winit), reçoit les événements système et les entrées clavier/souris, exécute une boucle stable avec horloge de frame bornée, **rend une frame GPU (couleur de fond, resize géré) via l'abstraction graphique du moteur — wgpu confiné dans `chaos_renderer`** — et s'arrête proprement (subsystems arrêtés en ordre inverse, ressources GPU libérées en premier). Architecture : `docs/architecture/engine-loop.md` et `docs/renderer/overview.md`.
 
 ```sh
 cargo run -p sandbox
