@@ -12,7 +12,7 @@ cargo test --workspace
 |---|---|---|
 | `chaos_core` | 5 | Avance de l'horloge de frame, delta borné à 250 ms, horloge figée → delta zéro, Color (rgb opaque, défaut noir) |
 | `chaos_window` | 4 | Traduction winit → types maison : touches, boutons, états, fallback `Unknown` |
-| `chaos_engine` | 8 | Init dans l'ordre / shutdown en ordre inverse, `CloseRequested` → exit, dispatch des événements aux subsystems, `frame_limit`, échec d'init (seuls les subsystems initialisés sont arrêtés), update/redraw ignorés avant démarrage, séquence update → render |
+| `chaos_engine` | 9 | Init dans l'ordre / shutdown en ordre inverse, `CloseRequested` → exit, dispatch des événements aux subsystems, `frame_limit`, gating de cadence (`target_fps`), échec d'init (seuls les subsystems initialisés sont arrêtés), update/redraw ignorés avant démarrage, séquence update → render |
 
 Les tests unitaires ne touchent jamais le GPU (la CI n'en a pas) : la validation
 GPU est locale, via les runs sandbox ci-dessous.
