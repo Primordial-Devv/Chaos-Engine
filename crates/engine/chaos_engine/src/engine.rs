@@ -6,6 +6,7 @@ use log::{debug, error, info, trace};
 
 use crate::config::EngineConfig;
 use crate::context::EngineContext;
+use crate::render_subsystem::RenderSubsystem;
 use crate::subsystem::Subsystem;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub struct Engine {
     window: Option<WindowHandle>,
     init_error: Option<ChaosError>,
     target_frame_time: Option<Duration>,
+    next_frame_at: Option<Instant>,
 }
 
 impl Engine {
@@ -47,6 +49,7 @@ impl Engine {
             window: None,
             init_error: None,
             target_frame_time,
+            next_frame_at: None,
         }
     }
 
@@ -87,14 +90,6 @@ impl Engine {
         self.state = EngineState::Running;
         info!("engine running ({} subsystem(s))", self.subsystems.len());
     }
-
-    fn pace_frame(&self, frame_started: Instant) {
-        if let Some(target) = self.target_frame_time
-            && let Some(rest) = target.checked_sub(frame_started.elapsed())
-        {
-            std::thread::sleep(rest);
-        }
-    }
 }
 
 impl WindowEventHandler for Engine {
@@ -104,6 +99,11 @@ impl WindowEventHandler for Engine {
             "window ready: {width}x{height} (scale factor {})",
             window.scale_factor()
         );
+        self.subsystems.push(Box::new(RenderSubsystem::new(
+            window.clone(),
+            self.config.clear_color,
+            self.config.vsync,
+        )));
         self.window = Some(window);
         self.start();
     }
@@ -120,10 +120,15 @@ impl WindowEventHandler for Engine {
     }
 
     fn on_update(&mut self) {
-        if self.state != EngineState::Running {
+        if self.state != EngineState::Running || self.context.exit_requested() {
             return;
         }
-        let frame_started = Instant::now();
+        let now = Instant::now();
+        if let Some(next_frame_at) = self.next_frame_at
+            && now < next_frame_at
+        {
+            return;
+        }
         let time = self.clock.tick();
         self.context.set_time(time);
         for subsystem in &mut self.subsystems[..self.initialized] {
@@ -136,8 +141,29 @@ impl WindowEventHandler for Engine {
             self.context.request_exit();
         }
         if !self.context.exit_requested() {
-            self.pace_frame(frame_started);
+            if let Some(target) = self.target_frame_time {
+                self.next_frame_at = Some(now + target);
+            }
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
+    }
+
+    fn on_redraw(&mut self) {
+        if self.state != EngineState::Running || self.context.exit_requested() {
+            return;
+        }
+        for subsystem in &mut self.subsystems[..self.initialized] {
+            subsystem.render(&mut self.context);
+        }
+    }
+
+    fn frame_deadline(&self) -> Option<Instant> {
+        if self.state != EngineState::Running || self.context.exit_requested() {
+            return None;
+        }
+        self.next_frame_at
     }
 
     fn exit_requested(&self) -> bool {
@@ -231,6 +257,10 @@ mod tests {
             ));
         }
 
+        fn render(&mut self, _context: &mut EngineContext) {
+            self.journal.push(format!("render {}", self.name));
+        }
+
         fn shutdown(&mut self, _context: &mut EngineContext) {
             self.journal.push(format!("shutdown {}", self.name));
         }
@@ -311,6 +341,40 @@ mod tests {
         assert!(engine.init_error.is_some());
         engine.on_shutdown();
         assert_eq!(journal.entries(), vec!["init a", "init b", "shutdown a"]);
+    }
+
+    #[test]
+    fn render_runs_after_update() {
+        let journal = Journal::default();
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Probe::boxed("a", &journal));
+        engine.start();
+        engine.on_update();
+        engine.on_redraw();
+        assert_eq!(journal.entries(), vec!["init a", "update a 1", "render a"]);
+    }
+
+    #[test]
+    fn paced_update_is_gated() {
+        let journal = Journal::default();
+        let mut engine = Engine::new(EngineConfig {
+            target_fps: Some(60),
+            ..EngineConfig::default()
+        });
+        engine.add_subsystem(Probe::boxed("a", &journal));
+        engine.start();
+        engine.on_update();
+        engine.on_update();
+        assert_eq!(journal.entries(), vec!["init a", "update a 1"]);
+    }
+
+    #[test]
+    fn redraw_before_start_is_ignored() {
+        let journal = Journal::default();
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Probe::boxed("a", &journal));
+        engine.on_redraw();
+        assert!(journal.entries().is_empty());
     }
 
     #[test]
