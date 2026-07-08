@@ -1,5 +1,5 @@
 use chaos_core::{ChaosResult, Color, Event, WindowEvent};
-use chaos_renderer::Renderer;
+use chaos_renderer::{Renderer, RendererConfig};
 use chaos_window::WindowHandle;
 use log::{error, info};
 
@@ -11,14 +11,16 @@ use crate::subsystem::Subsystem;
 pub(crate) struct RenderSubsystem {
     window: WindowHandle,
     clear_color: Color,
+    vsync: bool,
     renderer: Option<Renderer>,
 }
 
 impl RenderSubsystem {
-    pub(crate) fn new(window: WindowHandle, clear_color: Color) -> Self {
+    pub(crate) fn new(window: WindowHandle, clear_color: Color, vsync: bool) -> Self {
         Self {
             window,
             clear_color,
+            vsync,
             renderer: None,
         }
     }
@@ -31,7 +33,14 @@ impl Subsystem for RenderSubsystem {
 
     fn init(&mut self, _context: &mut EngineContext) -> ChaosResult<()> {
         let (width, height) = self.window.inner_size();
-        let mut renderer = Renderer::attach(self.window.clone(), width, height)?;
+        let mut renderer = Renderer::attach(
+            self.window.clone(),
+            RendererConfig {
+                width,
+                height,
+                vsync: self.vsync,
+            },
+        )?;
         renderer.set_clear_color(self.clear_color);
         self.renderer = Some(renderer);
         Ok(())

@@ -5,6 +5,7 @@ use raw_window_handle::{
 };
 
 use crate::backend::GraphicsBackend;
+use crate::renderer::RendererConfig;
 use crate::target::SurfaceTarget;
 
 pub(crate) struct WgpuBackend {
@@ -18,8 +19,7 @@ pub(crate) struct WgpuBackend {
 impl WgpuBackend {
     pub(crate) fn new(
         target: Box<dyn SurfaceTarget>,
-        width: u32,
-        height: u32,
+        renderer_config: RendererConfig,
     ) -> ChaosResult<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
@@ -54,9 +54,13 @@ impl WgpuBackend {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             color_space: wgpu::SurfaceColorSpace::Auto,
-            width: width.max(1),
-            height: height.max(1),
-            present_mode: wgpu::PresentMode::Fifo,
+            width: renderer_config.width.max(1),
+            height: renderer_config.height.max(1),
+            present_mode: if renderer_config.vsync {
+                wgpu::PresentMode::AutoVsync
+            } else {
+                wgpu::PresentMode::AutoNoVsync
+            },
             alpha_mode: capabilities
                 .alpha_modes
                 .first()

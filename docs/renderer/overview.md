@@ -43,7 +43,7 @@ Le rendu est piloté par `RedrawRequested` (hook `on_redraw` → phase render), 
 2. Render pass unique avec `LoadOp::Clear(clear_color)`.
 3. `queue.submit` puis `queue.present`.
 
-Robustesse : resize 0×0 ignoré (minimisation Windows), delta d'horloge borné côté moteur, présentation `Fifo` (vsync, seul mode garanti portable).
+Robustesse : resize 0×0 ignoré (minimisation Windows), delta d'horloge borné côté moteur. Présentation : `AutoVsync` si `RendererConfig::vsync` est actif, `AutoNoVsync` sinon — le défaut du moteur est vsync **off**, car un present bloquant sur le main thread rend les interactions fenêtre laggy sur macOS (winit #1737) ; la cadence est régulée par `target_fps` côté moteur.
 
 ## Couleur
 

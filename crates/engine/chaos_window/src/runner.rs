@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use chaos_core::{ChaosError, ChaosResult, Event};
 use log::{debug, error};
@@ -21,6 +22,7 @@ pub trait WindowEventHandler {
     fn on_event(&mut self, event: Event);
     fn on_update(&mut self);
     fn on_redraw(&mut self);
+    fn frame_deadline(&self) -> Option<Instant>;
     fn exit_requested(&self) -> bool;
     fn on_shutdown(&mut self);
 }
@@ -112,6 +114,11 @@ impl ApplicationHandler for WinitApp<'_> {
         self.handler.on_update();
         if self.handler.exit_requested() {
             event_loop.exit();
+            return;
+        }
+        match self.handler.frame_deadline() {
+            Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+            None => event_loop.set_control_flow(ControlFlow::Poll),
         }
     }
 }

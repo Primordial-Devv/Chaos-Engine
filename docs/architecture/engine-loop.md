@@ -30,11 +30,12 @@ Engine::run()
        ├─ on_event(Event)                    système + entrées, traduits
        │    └─ CloseRequested → request_exit
        ├─ on_update()                        chaque frame (about_to_wait) :
+       │    ├─ gating : rien avant l'échéance de frame (target_fps)
        │    ├─ FrameClock::tick()            delta borné (max 250 ms)
        │    ├─ update de chaque subsystem    phase simulation
        │    ├─ frame_limit éventuel
-       │    ├─ pacing processeur             si target_fps est défini
        │    └─ request_redraw()
+       ├─ frame_deadline()                   → ControlFlow::WaitUntil(échéance)
        ├─ on_redraw()                        sur RedrawRequested :
        │    └─ render de chaque subsystem    phase présentation
        └─ on_shutdown()                      subsystems arrêtés en ordre INVERSE
@@ -67,7 +68,7 @@ pub trait Subsystem {
 ## Temps et cadence
 
 - `FrameClock` borne le delta (250 ms par défaut) : un gel — breakpoint, mise en veille — ne produit jamais de pas de temps géant.
-- `EngineConfig::target_fps` (60 par défaut) endort le thread en fin de frame : courtoisie CPU en attendant que le renderer apporte la vsync. `None` = boucle libre.
+- `EngineConfig::target_fps` (60 par défaut) fixe l'échéance de la prochaine frame ; la boucle attend via `ControlFlow::WaitUntil` — **jamais par un sleep sur le main thread**. Sur macOS, toute occupation du main thread (sleep ou present vsync bloquant) rend le déplacement/resize de fenêtre laggy d'environ une seconde (winit #1737) ; c'est pour la même raison que `EngineConfig::vsync` est désactivé par défaut tant que le rendu est trivial. `None` = boucle libre.
 - `EngineConfig::frame_limit` arrête proprement le moteur après N frames — hook de test/CI (`CHAOS_FRAME_LIMIT` dans sandbox).
 
 ## Points d'accroche prévus (non implémentés)
