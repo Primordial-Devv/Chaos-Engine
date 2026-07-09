@@ -2,6 +2,10 @@ use std::process::ExitCode;
 
 use chaos_engine::{Color, Engine, EngineConfig, WindowConfig};
 
+mod geometry_demo;
+
+use geometry_demo::GeometryDemo;
+
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -18,7 +22,10 @@ fn main() -> ExitCode {
         ..EngineConfig::default()
     };
 
-    match Engine::new(config).run() {
+    let mut engine = Engine::new(config);
+    engine.add_subsystem(Box::new(GeometryDemo::default()));
+
+    match engine.run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("chaos engine terminated with an error: {error}");

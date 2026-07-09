@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use chaos_core::{ChaosError, ChaosResult, Event, FrameClock, WindowEvent};
+use chaos_renderer::{Renderer, RendererConfig};
 use chaos_window::{WindowEventHandler, WindowHandle, run_event_loop};
 use log::{debug, error, info, trace};
 
@@ -101,11 +102,27 @@ impl WindowEventHandler for Engine {
             "window ready: {width}x{height} (scale factor {})",
             window.scale_factor()
         );
-        self.subsystems.push(Box::new(RenderSubsystem::new(
+        match Renderer::attach(
             window.clone(),
-            self.config.clear_color,
-            self.config.vsync,
-        )));
+            RendererConfig {
+                width,
+                height,
+                vsync: self.config.vsync,
+            },
+        ) {
+            Ok(mut renderer) => {
+                renderer.set_clear_color(self.config.clear_color);
+                self.context.set_renderer(renderer);
+            }
+            Err(attach_error) => {
+                error!("renderer initialization failed: {attach_error}");
+                self.init_error = Some(attach_error);
+                self.context.request_exit();
+                self.window = Some(window);
+                return;
+            }
+        }
+        self.subsystems.push(Box::new(RenderSubsystem));
         self.window = Some(window);
         self.start();
     }
