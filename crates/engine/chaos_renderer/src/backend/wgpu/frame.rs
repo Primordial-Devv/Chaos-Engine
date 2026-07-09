@@ -58,17 +58,34 @@ impl WgpuBackend {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            for draw in &plan.draws {
+            main_pass.set_bind_group(0, &self.uniforms.frame_bind_group, &[]);
+            let mut bound_pipeline = None;
+            for (index, draw) in plan.draws.iter().enumerate() {
                 let Some(pipeline) = self.pipelines.get(draw.pipeline.index()) else {
                     warn!("draw ignored: unknown pipeline {:?}", draw.pipeline);
                     continue;
                 };
-                main_pass.set_pipeline(pipeline);
+                let Some(object_bind_group) = self.uniforms.object_bind_group(index) else {
+                    warn!("draw ignored: missing object uniform slot {index}");
+                    continue;
+                };
+                if bound_pipeline != Some(draw.pipeline.index()) {
+                    main_pass.set_pipeline(pipeline);
+                    bound_pipeline = Some(draw.pipeline.index());
+                }
+                main_pass.set_bind_group(1, object_bind_group, &[]);
                 if let Some(buffer_handle) = draw.vertex_buffer {
                     let pool_handle = PoolHandle {
                         index: buffer_handle.index,

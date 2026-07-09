@@ -1,4 +1,5 @@
 use chaos_core::Color;
+use chaos_core::math::Vec3;
 
 use crate::resources::{ColorVertex, bytes_of_u16};
 
@@ -59,6 +60,41 @@ impl Geometry {
             vertices,
             indices: vec![0, 1, 2, 0, 2, 3],
         }
+    }
+
+    /// Cube fermé : 24 sommets (4 par face, une couleur par face), 36 indices.
+    /// Faces ordonnées +X, -X, +Y, -Y, +Z, -Z ; enroulement CCW vu de
+    /// l'extérieur (convention moteur, compatible back-face culling).
+    pub fn cube(center: [f32; 3], size: f32, face_colors: [Color; 6]) -> Self {
+        let half = size / 2.0;
+        let origin = Vec3::from_array(center);
+        let faces = [
+            (Vec3::X, Vec3::NEG_Z, Vec3::Y),
+            (Vec3::NEG_X, Vec3::Z, Vec3::Y),
+            (Vec3::Y, Vec3::X, Vec3::NEG_Z),
+            (Vec3::NEG_Y, Vec3::X, Vec3::Z),
+            (Vec3::Z, Vec3::X, Vec3::Y),
+            (Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y),
+        ];
+        let mut vertices = Vec::with_capacity(24);
+        let mut indices = Vec::with_capacity(36);
+        for ((normal, u, v), color) in faces.into_iter().zip(face_colors) {
+            let base = u16::try_from(vertices.len()).unwrap_or(u16::MAX);
+            let corners = [
+                origin + (normal - u - v) * half,
+                origin + (normal + u - v) * half,
+                origin + (normal + u + v) * half,
+                origin + (normal - u + v) * half,
+            ];
+            for corner in corners {
+                vertices.push(ColorVertex {
+                    position: corner.to_array(),
+                    color: [color.r, color.g, color.b],
+                });
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        Self { vertices, indices }
     }
 
     pub fn is_indexed(&self) -> bool {
@@ -122,6 +158,61 @@ mod tests {
             assert!((vertex.position[0] - 10.0).abs() <= 1.0);
             assert!((vertex.position[1] + 5.0).abs() <= 1.0);
             assert_eq!(vertex.position[2], 2.0);
+        }
+    }
+
+    #[test]
+    fn cube_is_indexed_with_four_vertices_per_face() {
+        let cube = Geometry::cube([0.0, 0.0, 0.0], 1.0, [Color::WHITE; 6]);
+        assert_eq!(cube.vertices.len(), 24);
+        assert_eq!(cube.indices.len(), 36);
+        assert!(cube.is_indexed());
+        assert_eq!(cube.element_count(), 36);
+        assert!(
+            cube.indices
+                .iter()
+                .all(|index| usize::from(*index) < cube.vertices.len())
+        );
+    }
+
+    #[test]
+    fn cube_colors_are_uniform_per_face() {
+        let face_colors = [
+            Color::rgb(1.0, 0.0, 0.0),
+            Color::rgb(0.0, 1.0, 0.0),
+            Color::rgb(0.0, 0.0, 1.0),
+            Color::rgb(1.0, 1.0, 0.0),
+            Color::rgb(0.0, 1.0, 1.0),
+            Color::rgb(1.0, 0.0, 1.0),
+        ];
+        let cube = Geometry::cube([0.0, 0.0, 0.0], 2.0, face_colors);
+        for (face, color) in face_colors.iter().enumerate() {
+            for vertex in &cube.vertices[face * 4..face * 4 + 4] {
+                assert_eq!(vertex.color, [color.r, color.g, color.b]);
+            }
+        }
+    }
+
+    #[test]
+    fn cube_winding_is_ccw_seen_from_outside() {
+        let center = Vec3::new(1.0, -2.0, 3.0);
+        let cube = Geometry::cube(center.to_array(), 2.0, [Color::WHITE; 6]);
+        for triangle in cube.indices.chunks(3) {
+            let [a, b, c] = [triangle[0], triangle[1], triangle[2]]
+                .map(|index| Vec3::from_array(cube.vertices[usize::from(index)].position));
+            let normal = (b - a).cross(c - a);
+            let centroid = (a + b + c) / 3.0;
+            assert!(normal.dot(centroid - center) > 0.0);
+        }
+    }
+
+    #[test]
+    fn cube_center_offsets_every_vertex() {
+        let cube = Geometry::cube([10.0, -5.0, 2.0], 2.0, [Color::WHITE; 6]);
+        for vertex in &cube.vertices {
+            assert!((vertex.position[0] - 10.0).abs() <= 1.0);
+            assert!((vertex.position[1] + 5.0).abs() <= 1.0);
+            assert!((vertex.position[2] - 2.0).abs() <= 1.0);
         }
     }
 }

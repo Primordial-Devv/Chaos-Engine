@@ -30,6 +30,7 @@ chaos_scripting = { path = "crates/platform/chaos_scripting" }
 chaos_runtime = { path = "crates/platform/chaos_runtime" }
 chaos_tools = { path = "crates/tools/chaos_tools" }
 env_logger = "0.11"
+glam = "0.33"
 log = "0.4"
 naga = { version = "30", features = ["wgsl-in"] }
 pollster = "0.4"

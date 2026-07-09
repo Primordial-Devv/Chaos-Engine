@@ -8,6 +8,7 @@ use super::convert::{
     to_wgpu_cull_mode, to_wgpu_front_face, to_wgpu_step_mode, to_wgpu_topology,
     to_wgpu_vertex_attributes,
 };
+use super::depth::DEPTH_FORMAT;
 
 impl WgpuBackend {
     pub(super) fn build_pipeline(
@@ -29,7 +30,10 @@ impl WgpuBackend {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&descriptor.label),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[
+                    Some(&self.uniforms.frame_layout),
+                    Some(&self.uniforms.object_layout),
+                ],
                 immediate_size: 0,
             });
 
@@ -63,7 +67,13 @@ impl WgpuBackend {
                     front_face: to_wgpu_front_face(descriptor.front_face),
                     ..Default::default()
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &module,

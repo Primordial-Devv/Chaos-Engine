@@ -1,13 +1,17 @@
 pub mod config;
 pub mod context;
+pub mod debug;
 pub mod engine;
 mod render_subsystem;
 pub mod subsystem;
 
-pub use chaos_core::{ChaosError, ChaosResult, Color};
+pub use chaos_core::{
+    Camera, ChaosError, ChaosResult, Color, Event, InputEvent, KeyCode, Perspective, Transform,
+    WindowEvent, math,
+};
 pub use chaos_renderer::{
-    ColorVertex, DrawCommand, Geometry, MeshHandle, PipelineDescriptor, PipelineHandle, Renderer,
-    VertexAttributeFormat, VertexLayout, shaders,
+    ColorVertex, CullMode, DrawCommand, Geometry, MeshHandle, PipelineDescriptor, PipelineHandle,
+    Renderer, VertexAttributeFormat, VertexLayout, shaders,
 };
 pub use chaos_window::WindowConfig;
 pub use config::EngineConfig;

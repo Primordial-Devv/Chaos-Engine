@@ -1,3 +1,14 @@
+struct FrameUniforms {
+    view_projection: mat4x4<f32>,
+};
+
+struct ObjectUniforms {
+    model: mat4x4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> frame: FrameUniforms;
+@group(1) @binding(0) var<uniform> object: ObjectUniforms;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) color: vec3<f32>,
@@ -11,7 +22,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.position = vec4<f32>(input.position, 1.0);
+    output.position = frame.view_projection * object.model * vec4<f32>(input.position, 1.0);
     output.color = input.color;
     return output;
 }

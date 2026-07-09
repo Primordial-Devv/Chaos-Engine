@@ -1,3 +1,4 @@
+use chaos_core::math::Mat4;
 use chaos_core::{ChaosError, ChaosResult, Color};
 use log::{debug, info, warn};
 
@@ -7,6 +8,7 @@ use crate::frame::{DrawCommand, FrameDraw, FrameOutcome, FramePlan};
 use crate::geometry::Geometry;
 use crate::mesh::{MeshHandle, MeshRecord};
 use crate::pool::{PoolHandle, ResourcePool};
+use crate::queue::RenderQueue;
 use crate::resources::{
     BufferDescriptor, BufferHandle, ColorVertex, PipelineDescriptor, PipelineHandle, ShaderRef,
 };
@@ -23,7 +25,9 @@ pub struct Renderer {
     shaders: ShaderLibrary,
     meshes: ResourcePool<MeshRecord>,
     clear_color: Color,
-    pending_draws: Vec<DrawCommand>,
+    view_projection: Mat4,
+    surface_size: (u32, u32),
+    queue: RenderQueue,
 }
 
 impl Renderer {
@@ -34,7 +38,9 @@ impl Renderer {
     ) -> ChaosResult<Self> {
         let backend = create_backend(Box::new(target), config)?;
         info!("renderer ready: {}", backend.description());
-        Ok(Self::with_backend(backend))
+        let mut renderer = Self::with_backend(backend);
+        renderer.surface_size = (config.width, config.height);
+        Ok(renderer)
     }
 
     pub(crate) fn with_backend(backend: Box<dyn GraphicsBackend>) -> Self {
@@ -43,7 +49,9 @@ impl Renderer {
             shaders: ShaderLibrary::with_builtins(),
             meshes: ResourcePool::new(),
             clear_color: Color::BLACK,
-            pending_draws: Vec::new(),
+            view_projection: Mat4::IDENTITY,
+            surface_size: (1, 1),
+            queue: RenderQueue::new(),
         }
     }
 
@@ -67,8 +75,21 @@ impl Renderer {
         self.clear_color
     }
 
+    /// Fixe la matrice vue-projection de la frame (fournie par la caméra).
+    pub fn set_view_projection(&mut self, view_projection: Mat4) {
+        self.view_projection = view_projection;
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
+        if width > 0 && height > 0 {
+            self.surface_size = (width, height);
+        }
         self.backend.resize(width, height);
+    }
+
+    /// Dernière taille de surface connue (largeur, hauteur) en pixels.
+    pub fn surface_size(&self) -> (u32, u32) {
+        self.surface_size
     }
 
     /// Crée un pipeline graphique : résout la référence shader via la
@@ -156,17 +177,28 @@ impl Renderer {
         }
     }
 
-    /// Enregistre un ordre de dessin pour la prochaine frame.
+    /// Soumet un ordre de dessin à la RenderQueue de la frame de simulation
+    /// courante.
     pub fn queue_draw(&mut self, command: DrawCommand) {
-        self.pending_draws.push(command);
+        self.queue.submit(command);
     }
 
-    /// Construit le plan de la frame courante — les meshes des draws sont
-    /// résolus en buffers ici (un mesh détruit entre-temps est écarté avec
-    /// un warn) — puis le fait exécuter au backend. La file repart vide.
+    /// Vide la RenderQueue — appelée par le moteur au début de chaque
+    /// frame de simulation. Les draws survivent ainsi aux présentations
+    /// multiples entre deux updates (rafales de redraw du resize interactif).
+    pub fn clear_draws(&mut self) {
+        self.queue.clear();
+    }
+
+    /// Construit le plan de la frame courante : les draws sont pris dans
+    /// l'ordre de rendu de la RenderQueue, leurs meshes résolus en buffers
+    /// (un mesh détruit entre-temps est écarté avec un warn), puis le plan
+    /// est exécuté par le backend. Les draws restent en place jusqu'au
+    /// prochain `clear_draws` du moteur.
     pub fn render_frame(&mut self) -> ChaosResult<FrameOutcome> {
-        let mut draws = Vec::with_capacity(self.pending_draws.len());
-        for command in std::mem::take(&mut self.pending_draws) {
+        let commands = self.queue.ordered();
+        let mut draws = Vec::with_capacity(commands.len());
+        for command in commands {
             let pool_handle = PoolHandle {
                 index: command.mesh.index,
                 generation: command.mesh.generation,
@@ -180,10 +212,12 @@ impl Renderer {
                 vertex_buffer: Some(record.vertex_buffer),
                 index_buffer: record.index_buffer,
                 element_count: record.element_count,
+                model: command.transform.matrix(),
             });
         }
         let plan = FramePlan {
             clear_color: self.clear_color,
+            view_projection: self.view_projection,
             draws,
         };
         self.backend.render(&plan)
@@ -194,6 +228,9 @@ impl Renderer {
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    use chaos_core::Transform;
+    use chaos_core::math::Vec3;
 
     use crate::frame::FrameSkipReason;
     use crate::resources::ShaderSource;
@@ -269,21 +306,34 @@ mod tests {
 
         fn render(&mut self, plan: &FramePlan) -> ChaosResult<FrameOutcome> {
             let color = plan.clear_color;
-            let draws: Vec<(u32, Option<u32>, Option<u32>, u32)> = plan
+            let vp = plan.view_projection.w_axis;
+            let draws: Vec<String> = plan
                 .draws
                 .iter()
                 .map(|draw| {
-                    (
+                    let model = draw.model.w_axis;
+                    format!(
+                        "({}, {:?}, {:?}, {}, m=[{}, {}, {}])",
                         draw.pipeline.0,
                         draw.vertex_buffer.map(|buffer| buffer.index),
                         draw.index_buffer.map(|buffer| buffer.index),
                         draw.element_count,
+                        model.x,
+                        model.y,
+                        model.z
                     )
                 })
                 .collect();
             self.journal.push(format!(
-                "render r={} g={} b={} a={} draws={draws:?}",
-                color.r, color.g, color.b, color.a
+                "render r={} g={} b={} a={} vp=[{}, {}, {}] draws=[{}]",
+                color.r,
+                color.g,
+                color.b,
+                color.a,
+                vp.x,
+                vp.y,
+                vp.z,
+                draws.join(", ")
             ));
             Ok(self.outcome)
         }
@@ -320,11 +370,18 @@ mod tests {
         Geometry::quad([0.0, 0.0, 0.0], 1.0, 1.0, Color::WHITE)
     }
 
+    fn cube() -> Geometry {
+        Geometry::cube([0.0, 0.0, 0.0], 1.0, [Color::WHITE; 6])
+    }
+
     #[test]
     fn frame_plan_carries_current_clear_color() {
         let (mut renderer, journal) = mock_renderer();
         renderer.render_frame().unwrap();
-        assert_eq!(journal.entries(), vec!["render r=0 g=0 b=0 a=1 draws=[]"]);
+        assert_eq!(
+            journal.entries(),
+            vec!["render r=0 g=0 b=0 a=1 vp=[0, 0, 0] draws=[]"]
+        );
     }
 
     #[test]
@@ -334,7 +391,7 @@ mod tests {
         renderer.render_frame().unwrap();
         assert_eq!(
             journal.entries(),
-            vec!["render r=1 g=0.5 b=0.25 a=1 draws=[]"]
+            vec!["render r=1 g=0.5 b=0.25 a=1 vp=[0, 0, 0] draws=[]"]
         );
         assert_eq!(renderer.clear_color(), Color::rgb(1.0, 0.5, 0.25));
     }
@@ -351,6 +408,9 @@ mod tests {
         let (mut renderer, journal) = mock_renderer();
         renderer.resize(1920, 1080);
         assert_eq!(journal.entries(), vec!["resize 1920x1080"]);
+        assert_eq!(renderer.surface_size(), (1920, 1080));
+        renderer.resize(0, 0);
+        assert_eq!(renderer.surface_size(), (1920, 1080));
     }
 
     #[test]
@@ -467,22 +527,99 @@ mod tests {
         renderer.queue_draw(DrawCommand {
             pipeline,
             mesh: tri,
+            transform: Transform::IDENTITY,
         });
         renderer.queue_draw(DrawCommand {
             pipeline,
             mesh: quad,
+            transform: Transform::from_translation(Vec3::new(5.0, 0.0, 0.0)),
         });
         renderer.render_frame().unwrap();
         renderer.render_frame().unwrap();
+        renderer.clear_draws();
+        renderer.render_frame().unwrap();
         let entries = journal.entries();
-        assert_eq!(
-            entries[entries.len() - 2],
-            "render r=0 g=0 b=0 a=1 draws=[(0, Some(0), None, 3), (0, Some(1), Some(2), 6)]"
-        );
+        let full_plan = "render r=0 g=0 b=0 a=1 vp=[0, 0, 0] draws=[(0, Some(0), None, 3, m=[0, 0, 0]), (0, Some(1), Some(2), 6, m=[5, 0, 0])]";
+        assert_eq!(entries[entries.len() - 3], full_plan);
+        assert_eq!(entries[entries.len() - 2], full_plan);
         assert_eq!(
             entries[entries.len() - 1],
-            "render r=0 g=0 b=0 a=1 draws=[]"
+            "render r=0 g=0 b=0 a=1 vp=[0, 0, 0] draws=[]"
         );
+    }
+
+    #[test]
+    fn interleaved_pipelines_are_grouped_in_the_plan() {
+        let (mut renderer, journal) = mock_renderer();
+        let first = renderer.create_pipeline(&inline_descriptor("a")).unwrap();
+        let second = renderer.create_pipeline(&inline_descriptor("b")).unwrap();
+        let mesh = renderer.create_mesh("tri", &triangle()).unwrap();
+        let submissions = [(second, 1.0), (first, 2.0), (second, 3.0), (first, 4.0)];
+        for (pipeline, x) in submissions {
+            renderer.queue_draw(DrawCommand {
+                pipeline,
+                mesh,
+                transform: Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+            });
+        }
+        renderer.render_frame().unwrap();
+        let entries = journal.entries();
+        assert_eq!(
+            entries[entries.len() - 1],
+            "render r=0 g=0 b=0 a=1 vp=[0, 0, 0] draws=[\
+             (0, Some(0), None, 3, m=[2, 0, 0]), \
+             (0, Some(0), None, 3, m=[4, 0, 0]), \
+             (1, Some(0), None, 3, m=[1, 0, 0]), \
+             (1, Some(0), None, 3, m=[3, 0, 0])]"
+        );
+    }
+
+    #[test]
+    fn shared_mesh_draws_with_distinct_transforms() {
+        let (mut renderer, journal) = mock_renderer();
+        let pipeline = renderer.create_pipeline(&inline_descriptor("p")).unwrap();
+        let mesh = renderer.create_mesh("cube", &cube()).unwrap();
+        for x in [-2.0, 0.0, 2.0] {
+            renderer.queue_draw(DrawCommand {
+                pipeline,
+                mesh,
+                transform: Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+            });
+        }
+        renderer.render_frame().unwrap();
+        let entries = journal.entries();
+        assert_eq!(
+            entries[entries.len() - 1],
+            "render r=0 g=0 b=0 a=1 vp=[0, 0, 0] draws=[\
+             (0, Some(0), Some(1), 36, m=[-2, 0, 0]), \
+             (0, Some(0), Some(1), 36, m=[0, 0, 0]), \
+             (0, Some(0), Some(1), 36, m=[2, 0, 0])]"
+        );
+    }
+
+    #[test]
+    fn many_draws_reach_the_plan_in_submission_order() {
+        let (mut renderer, journal) = mock_renderer();
+        let pipeline = renderer.create_pipeline(&inline_descriptor("p")).unwrap();
+        let mesh = renderer.create_mesh("cube", &cube()).unwrap();
+        for index in 0u8..16 {
+            renderer.queue_draw(DrawCommand {
+                pipeline,
+                mesh,
+                transform: Transform::from_translation(Vec3::new(f32::from(index), 0.0, 0.0)),
+            });
+        }
+        renderer.render_frame().unwrap();
+        let entries = journal.entries();
+        let plan = entries[entries.len() - 1].clone();
+        assert_eq!(plan.matches("m=[").count(), 16);
+        let positions: Vec<usize> = (0u8..16)
+            .map(|index| {
+                plan.find(&format!("m=[{}, 0, 0]", f32::from(index)))
+                    .unwrap()
+            })
+            .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
@@ -502,13 +639,28 @@ mod tests {
         let (mut renderer, journal) = mock_renderer();
         let pipeline = renderer.create_pipeline(&inline_descriptor("p")).unwrap();
         let mesh = renderer.create_mesh("tri", &triangle()).unwrap();
-        renderer.queue_draw(DrawCommand { pipeline, mesh });
+        renderer.queue_draw(DrawCommand {
+            pipeline,
+            mesh,
+            transform: Transform::IDENTITY,
+        });
         renderer.destroy_mesh(mesh).unwrap();
         renderer.render_frame().unwrap();
         let entries = journal.entries();
         assert_eq!(
             entries[entries.len() - 1],
-            "render r=0 g=0 b=0 a=1 draws=[]"
+            "render r=0 g=0 b=0 a=1 vp=[0, 0, 0] draws=[]"
+        );
+    }
+
+    #[test]
+    fn view_projection_travels_in_the_plan() {
+        let (mut renderer, journal) = mock_renderer();
+        renderer.set_view_projection(Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0)));
+        renderer.render_frame().unwrap();
+        assert_eq!(
+            journal.entries(),
+            vec!["render r=0 g=0 b=0 a=1 vp=[1, 2, 3] draws=[]"]
         );
     }
 }

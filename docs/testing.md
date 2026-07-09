@@ -1,6 +1,6 @@
 # Tests du moteur
 
-Tout se lance depuis la racine du workspace. Ce document couvre les phases 1 (cycle de vie, fenêtre, événements, boucle) et 2 (renderer minimal) et s'étoffera à chaque phase.
+Tout se lance depuis la racine du workspace. Ce document couvre les phases 1 (cycle de vie, fenêtre, événements, boucle) et 2 (renderer minimal) ainsi que Rendering Core V1 et V2 (pipelines, géométrie, mesh, transforms, caméra, depth, RenderQueue) et s'étoffera à chaque phase.
 
 ## 1. Tests unitaires
 
@@ -10,10 +10,10 @@ cargo test --workspace
 
 | Crate | Tests | Ce qui est vérifié |
 |---|---|---|
-| `chaos_core` | 5 | Avance de l'horloge de frame, delta borné à 250 ms, horloge figée → delta zéro, Color (rgb opaque, défaut noir) |
+| `chaos_core` | 20 | Horloge de frame, Color, **Transform** (matrice, TRS, directions locales), **conventions mathématiques verrouillées** (main droite, column-major, rotations, profondeur 0..1), **Camera** (view inverse du transform, projection NDC centrée, composition P×V, aspect au viewport) |
 | `chaos_window` | 4 | Traduction winit → types maison : touches, boutons, états, fallback `Unknown` |
-| `chaos_renderer` | 34 | Orchestration via backend factice (plan de frame, outcomes, pipelines, shaders, buffers, **meshes**), géométrie (primitives, indices valides), **vertex layouts déclaratifs** (`packed` : offsets/stride/locations, layout du vertex standard), **pool générationnel**, **validation naga des `.wgsl` intégrés**, + 2 tests d'isolation wgpu |
-| `chaos_engine` | 9 | Init dans l'ordre / shutdown en ordre inverse, `CloseRequested` → exit, dispatch des événements aux subsystems, `frame_limit`, gating de cadence (`target_fps`), échec d'init (seuls les subsystems initialisés sont arrêtés), update/redraw ignorés avant démarrage, séquence update → render |
+| `chaos_renderer` | 46 | Orchestration via backend factice (plan de frame, outcomes, pipelines, shaders, buffers, meshes, **uniforms** : view-projection dans le plan, Transform → matrice modèle par draw), géométrie (dont le **cube** : enroulement CCW verrouillé, couleur par face), **RenderQueue** (tri stable par pipeline), **vertex layouts déclaratifs**, **pool générationnel**, + 3 tests d'intégration : 2 d'**isolation wgpu**, 1 **validation naga des `.wgsl` intégrés** |
+| `chaos_engine` | 16 | Cycle de vie complet (init/shutdown ordonnés, exits, gating, échecs d'init, update → render) + **contrôleur de caméra debug** (avance selon forward, purge au focus perdu, rotation au drag droit seulement, pas de saut au premier mouvement, pitch clampé, vitesse bornée à la molette) |
 
 Les tests unitaires ne touchent jamais le GPU (la CI n'en a pas) : la validation
 GPU est locale, via les runs sandbox ci-dessous.
@@ -33,25 +33,56 @@ CHAOS_FRAME_LIMIT=180 cargo run -p sandbox
 La fenêtre s'ouvre, le moteur tourne 180 frames (~3 s à 60 fps) puis s'arrête seul. Séquence attendue dans les logs :
 
 ```
-INFO  Chaos Sandbox starting (Chaos Engine 0.1.0)
+INFO  Chaos Sandbox starting (Chaos Engine <version>)
 INFO  window ready: <w>x<h> (scale factor <n>)
 INFO  graphics adapter selected: wgpu (<GPU> / <Backend>)
 INFO  renderer ready: wgpu (<GPU> / <Backend>)
-INFO  engine running (1 subsystem(s))
+INFO  engine running (2 subsystem(s))
 INFO  frame limit reached (180), requesting exit
 INFO  engine shutting down
+INFO  renderer released
 INFO  engine stopped
 INFO  Chaos Sandbox stopped cleanly
 ```
 
+Les 2 subsystems : `geometry_demo` (contenu) + `render_subsystem` (pilote,
+enregistré automatiquement en dernier).
+
 Le code de sortie doit être `0` (`echo $?` juste après).
 
-La fenêtre doit afficher **le triangle dégradé (rose/violet/cyan) à gauche et
-le quad violet à droite** sur le fond violet sombre — les deux chemins de rendu
-(non indexé et indexé) côte à côte, via les primitives `Geometry` du moteur.
-Les logs `debug` montrent le pipeline `demo.geometry` et trois buffers
-(`demo.triangle` 72 o, `demo.quad` 96 o, `demo.quad.indices` 12 o). Le log
-`renderer released` doit apparaître au shutdown, avant `engine stopped`.
+La fenêtre doit afficher la **scène multi-objets** — 13 draws par frame pour
+seulement **3 meshes partagés** : un **sol violet sombre** (quad 1×1 étiré en
+8×8 par une échelle non uniforme, posé à y=-1), le **cube central 6 couleurs**
+en rotation lente sur deux axes, une **ronde de 8 cubes** — le même mesh que
+le central — de tailles (0.3 → 0.72) et vitesses d'orbite/spin toutes
+différentes, et **trois triangles dégradés** flottants d'échelles distinctes.
+Les vitesses d'orbite différentes font que les cubes **se croisent en
+permanence** : l'occlusion doit rester correcte à chaque croisement (devant /
+derrière le cube central et entre eux). La scène traverse **deux pipelines** :
+les cubes fermés passent par `demo.geometry` (back-face culling — corrects
+sous tous les angles), sol et triangles par `demo.geometry.double_sided`
+(visibles des deux côtés — la sémantique correcte d'une géométrie plate). La
+démo soumet en ordre de scène ; la **RenderQueue** regroupe par pipeline avant
+le backend — visuellement invisible (géométrie opaque + depth buffer), c'est
+le point. **Au resize, les proportions sont conservées** (le sol reste carré,
+les cubes ne s'étirent pas) : c'est la caméra qui gère l'aspect ratio, plus
+l'étirement NDC. Les logs `debug` montrent les deux pipelines, cinq buffers,
+trois meshes, et `object uniform slots grown to 13` — atteint une seule fois
+à la première frame, puis les slots sont réutilisés. Le log `renderer
+released` doit apparaître au shutdown, avant `engine stopped`.
+
+### Navigation debug dans la scène
+
+La caméra se pilote au clavier/souris (contrôleur `chaos_engine::debug`) :
+
+| Contrôle | Action |
+|---|---|
+| **Clic droit maintenu + souris** | Regarder (yaw/pitch, pitch clampé ±89°) |
+| **Z/Q/S/D** (touches physiques WASD) | Avancer / gauche / reculer / droite |
+| **Espace / Shift gauche** | Monter / descendre |
+| **Molette** | Vitesse de déplacement (0,1 → 100 m/s) |
+
+Perte de focus (alt-tab) → touches et drag purgés, aucune touche fantôme.
 
 ## 3. Test interactif du cycle de vie
 

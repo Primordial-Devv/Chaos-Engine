@@ -150,6 +150,9 @@ impl WindowEventHandler for Engine {
         }
         let time = self.clock.tick();
         self.context.set_time(time);
+        if let Some(renderer) = self.context.renderer_mut() {
+            renderer.clear_draws();
+        }
         for subsystem in &mut self.subsystems[..self.initialized] {
             subsystem.update(&mut self.context);
         }

@@ -11,13 +11,17 @@ use crate::target::SurfaceTarget;
 
 mod buffer;
 mod convert;
+mod depth;
 mod frame;
 mod pipeline;
 mod setup;
+mod uniforms;
 
 use crate::pool::ResourcePool;
+use convert::mat4_to_bytes;
 use frame::Acquisition;
 use setup::GpuContext;
+use uniforms::Uniforms;
 
 pub(super) struct WgpuBackend {
     surface: wgpu::Surface<'static>,
@@ -28,6 +32,8 @@ pub(super) struct WgpuBackend {
     suspended: bool,
     pipelines: Vec<wgpu::RenderPipeline>,
     buffers: ResourcePool<wgpu::Buffer>,
+    uniforms: Uniforms,
+    depth_view: wgpu::TextureView,
 }
 
 impl WgpuBackend {
@@ -42,6 +48,8 @@ impl WgpuBackend {
             config,
             description,
         } = setup::initialize(target, renderer_config)?;
+        let uniforms = Uniforms::new(&device);
+        let depth_view = depth::create_depth_view(&device, config.width, config.height);
         Ok(Self {
             surface,
             device,
@@ -51,6 +59,8 @@ impl WgpuBackend {
             suspended: false,
             pipelines: Vec::new(),
             buffers: ResourcePool::new(),
+            uniforms,
+            depth_view,
         })
     }
 }
@@ -70,6 +80,7 @@ impl GraphicsBackend for WgpuBackend {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+        self.depth_view = depth::create_depth_view(&self.device, width, height);
     }
 
     fn create_pipeline(
@@ -91,6 +102,14 @@ impl GraphicsBackend for WgpuBackend {
     fn render(&mut self, plan: &FramePlan) -> ChaosResult<FrameOutcome> {
         if self.suspended {
             return Ok(FrameOutcome::Skipped(FrameSkipReason::ZeroArea));
+        }
+        self.uniforms
+            .write_frame(&self.queue, &mat4_to_bytes(plan.view_projection));
+        self.uniforms
+            .ensure_object_slots(&self.device, plan.draws.len());
+        for (index, draw) in plan.draws.iter().enumerate() {
+            self.uniforms
+                .write_object(&self.queue, index, &mat4_to_bytes(draw.model));
         }
         let frame = match self.acquire_frame()? {
             Acquisition::Ready(frame) => frame,
