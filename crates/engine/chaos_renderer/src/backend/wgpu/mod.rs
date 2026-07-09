@@ -5,21 +5,28 @@ use crate::backend::GraphicsBackend;
 use crate::config::RendererConfig;
 use crate::frame::{FrameOutcome, FramePlan, FrameSkipReason};
 use crate::resources::{
-    BufferDescriptor, BufferHandle, PipelineDescriptor, PipelineHandle, ShaderSource,
+    BufferDescriptor, BufferHandle, MaterialBindingDescriptor, MaterialBindingHandle,
+    PipelineDescriptor, PipelineHandle, SamplerDescriptor, SamplerHandle, ShaderSource,
+    TextureDescriptor, TextureHandle,
 };
 use crate::target::SurfaceTarget;
 
+mod binding;
 mod buffer;
 mod convert;
 mod depth;
 mod frame;
 mod pipeline;
+mod sampler;
 mod setup;
+mod texture;
 mod uniforms;
 
 use crate::pool::ResourcePool;
+use binding::MaterialBindings;
 use convert::mat4_to_bytes;
 use frame::Acquisition;
+use pipeline::PipelineEntry;
 use setup::GpuContext;
 use uniforms::Uniforms;
 
@@ -30,8 +37,11 @@ pub(super) struct WgpuBackend {
     config: wgpu::SurfaceConfiguration,
     description: String,
     suspended: bool,
-    pipelines: Vec<wgpu::RenderPipeline>,
+    pipelines: Vec<PipelineEntry>,
     buffers: ResourcePool<wgpu::Buffer>,
+    textures: ResourcePool<wgpu::Texture>,
+    samplers: ResourcePool<wgpu::Sampler>,
+    material_bindings: MaterialBindings,
     uniforms: Uniforms,
     depth_view: wgpu::TextureView,
 }
@@ -49,6 +59,7 @@ impl WgpuBackend {
             description,
         } = setup::initialize(target, renderer_config)?;
         let uniforms = Uniforms::new(&device);
+        let material_bindings = MaterialBindings::new(&device);
         let depth_view = depth::create_depth_view(&device, config.width, config.height);
         Ok(Self {
             surface,
@@ -59,6 +70,9 @@ impl WgpuBackend {
             suspended: false,
             pipelines: Vec::new(),
             buffers: ResourcePool::new(),
+            textures: ResourcePool::new(),
+            samplers: ResourcePool::new(),
+            material_bindings,
             uniforms,
             depth_view,
         })
@@ -97,6 +111,33 @@ impl GraphicsBackend for WgpuBackend {
 
     fn destroy_buffer(&mut self, handle: BufferHandle) -> ChaosResult<()> {
         self.release_buffer(handle)
+    }
+
+    fn create_texture(&mut self, descriptor: &TextureDescriptor) -> ChaosResult<TextureHandle> {
+        self.build_texture(descriptor)
+    }
+
+    fn destroy_texture(&mut self, handle: TextureHandle) -> ChaosResult<()> {
+        self.release_texture(handle)
+    }
+
+    fn create_sampler(&mut self, descriptor: &SamplerDescriptor) -> ChaosResult<SamplerHandle> {
+        self.build_sampler(descriptor)
+    }
+
+    fn destroy_sampler(&mut self, handle: SamplerHandle) -> ChaosResult<()> {
+        self.release_sampler(handle)
+    }
+
+    fn create_material_binding(
+        &mut self,
+        descriptor: &MaterialBindingDescriptor,
+    ) -> ChaosResult<MaterialBindingHandle> {
+        self.build_material_binding(descriptor)
+    }
+
+    fn destroy_material_binding(&mut self, handle: MaterialBindingHandle) -> ChaosResult<()> {
+        self.release_material_binding(handle)
     }
 
     fn render(&mut self, plan: &FramePlan) -> ChaosResult<FrameOutcome> {

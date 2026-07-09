@@ -1,10 +1,11 @@
 use crate::frame::DrawCommand;
 
 /// File de rendu du moteur : reçoit les soumissions en ordre de scène et
-/// rend l'ordre de rendu. V1 : tri **stable** par pipeline — le regroupement
-/// minimise les changements d'état GPU et l'ordre de soumission est préservé
-/// à clé égale. La clé grandira (passe, opaque/transparent, matériau,
-/// profondeur) sans changer ce contrat.
+/// rend l'ordre de rendu. Clé actuelle : le **material** — un material
+/// implique un pipeline et un bind group, le tri stable regroupe donc les
+/// deux états GPU ; l'ordre de soumission est préservé à clé égale. La clé
+/// grandira (passe, opaque/transparent, profondeur, tri composite
+/// pipeline+material) sans changer ce contrat.
 #[derive(Default)]
 pub struct RenderQueue {
     commands: Vec<DrawCommand>,
@@ -35,8 +36,7 @@ impl RenderQueue {
     /// quand la file est déjà en ordre (présentations répétées d'une même
     /// frame de simulation).
     pub fn ordered(&mut self) -> &[DrawCommand] {
-        self.commands
-            .sort_by_key(|command| command.pipeline.index());
+        self.commands.sort_by_key(|command| command.material.index);
         &self.commands
     }
 }
@@ -46,16 +46,19 @@ mod tests {
     use chaos_core::Transform;
     use chaos_core::math::Vec3;
 
+    use crate::material::MaterialHandle;
     use crate::mesh::MeshHandle;
-    use crate::resources::PipelineHandle;
 
     use super::*;
 
-    fn command(pipeline: u32, x: f32) -> DrawCommand {
+    fn command(material: u32, x: f32) -> DrawCommand {
         DrawCommand {
-            pipeline: PipelineHandle(pipeline),
             mesh: MeshHandle {
                 index: 0,
+                generation: 0,
+            },
+            material: MaterialHandle {
+                index: material,
                 generation: 0,
             },
             transform: Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
@@ -66,7 +69,7 @@ mod tests {
         queue
             .ordered()
             .iter()
-            .map(|command| (command.pipeline.0, command.transform.translation.x))
+            .map(|command| (command.material.index, command.transform.translation.x))
             .collect()
     }
 
@@ -79,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn submission_order_is_preserved_within_a_pipeline() {
+    fn submission_order_is_preserved_within_a_material() {
         let mut queue = RenderQueue::new();
         for step in 0u8..4 {
             queue.submit(command(0, f32::from(step)));
@@ -91,7 +94,7 @@ mod tests {
     }
 
     #[test]
-    fn interleaved_pipelines_are_grouped_stably() {
+    fn interleaved_materials_are_grouped_stably() {
         let mut queue = RenderQueue::new();
         queue.submit(command(1, 1.0));
         queue.submit(command(0, 2.0));

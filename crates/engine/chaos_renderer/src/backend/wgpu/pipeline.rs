@@ -10,6 +10,13 @@ use super::convert::{
 };
 use super::depth::DEPTH_FORMAT;
 
+/// Pipeline GPU accompagné de son contrat de binding : la passe doit savoir
+/// si le groupe(2) material est attendu par les draws.
+pub(super) struct PipelineEntry {
+    pub(super) pipeline: wgpu::RenderPipeline,
+    pub(super) uses_material: bool,
+}
+
 impl WgpuBackend {
     pub(super) fn build_pipeline(
         &mut self,
@@ -26,14 +33,18 @@ impl WgpuBackend {
                 source: wgpu::ShaderSource::Wgsl(source.as_str().into()),
             });
 
+        let mut bind_group_layouts = vec![
+            Some(&self.uniforms.frame_layout),
+            Some(&self.uniforms.object_layout),
+        ];
+        if descriptor.material {
+            bind_group_layouts.push(Some(&self.material_bindings.layout));
+        }
         let layout = self
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&descriptor.label),
-                bind_group_layouts: &[
-                    Some(&self.uniforms.frame_layout),
-                    Some(&self.uniforms.object_layout),
-                ],
+                bind_group_layouts: &bind_group_layouts,
                 immediate_size: 0,
             });
 
@@ -98,7 +109,10 @@ impl WgpuBackend {
 
         let index = u32::try_from(self.pipelines.len())
             .map_err(|_| ChaosError::Graphics(String::from("pipeline capacity exceeded")))?;
-        self.pipelines.push(pipeline);
+        self.pipelines.push(PipelineEntry {
+            pipeline,
+            uses_material: descriptor.material,
+        });
         let handle = PipelineHandle(index);
         debug!("pipeline '{}' created ({handle:?})", descriptor.label);
         Ok(handle)

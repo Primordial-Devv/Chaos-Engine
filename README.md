@@ -46,11 +46,11 @@ cargo clippy --workspace --all-targets
 
 ## Statut
 
-Phase 2 terminée : le moteur démarre, ouvre une fenêtre native (Windows/macOS via winit), reçoit les événements système et les entrées clavier/souris, exécute une boucle stable avec horloge de frame bornée, **rend une frame GPU (couleur de fond, resize géré) via l'abstraction graphique du moteur — wgpu confiné dans `chaos_renderer`** — et s'arrête proprement (subsystems arrêtés en ordre inverse, ressources GPU libérées en premier). Architecture : `docs/architecture/engine-loop.md` et `docs/renderer/overview.md`.
+Rendering Core V1, V2 et V3 terminés : le moteur affiche une **vraie scène 3D pilotée par des materials** — caméra perspective au contrôleur debug (vol libre), transforms par objet, depth buffer, RenderQueue triée par material, meshes colorés et **texturés** (UV, damier sRGB procédural, sampler Nearest/Repeat), **materials haut niveau** (pipeline + couleur de base + texture/sampler optionnels avec fallbacks builtin et cache de textures) — le tout sur des conventions verrouillées par tests (maths main droite, enroulement CCW, bindings `shaders::inputs`, validation naga en CI) et **wgpu strictement confiné dans `chaos_renderer/src/backend/`** (verrou d'isolation en CI). 127 tests. Architecture : `docs/architecture/engine-loop.md`, `docs/architecture/math-conventions.md` et `docs/renderer/overview.md` ; l'accueil du lighting et du PBR est cartographié dans `docs/renderer/lighting-preparation.md`.
 
 ```sh
 cargo run -p sandbox
 CHAOS_FRAME_LIMIT=180 cargo run -p sandbox
 ```
 
-Prochaines phases : renderer, ECS, scènes, assets, physique, audio, réseau, runtime/plateforme.
+Prochaines phases : Asset Pipeline, ECS, scènes, physique, audio, réseau, runtime/plateforme.

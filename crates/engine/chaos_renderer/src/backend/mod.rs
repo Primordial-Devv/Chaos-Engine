@@ -3,7 +3,9 @@ use chaos_core::ChaosResult;
 use crate::config::RendererConfig;
 use crate::frame::{FrameOutcome, FramePlan};
 use crate::resources::{
-    BufferDescriptor, BufferHandle, PipelineDescriptor, PipelineHandle, ShaderSource,
+    BufferDescriptor, BufferHandle, MaterialBindingDescriptor, MaterialBindingHandle,
+    PipelineDescriptor, PipelineHandle, SamplerDescriptor, SamplerHandle, ShaderSource,
+    TextureDescriptor, TextureHandle,
 };
 use crate::target::SurfaceTarget;
 
@@ -28,6 +30,21 @@ pub trait GraphicsBackend {
     fn create_buffer(&mut self, descriptor: &BufferDescriptor) -> ChaosResult<BufferHandle>;
 
     fn destroy_buffer(&mut self, handle: BufferHandle) -> ChaosResult<()>;
+
+    fn create_texture(&mut self, descriptor: &TextureDescriptor) -> ChaosResult<TextureHandle>;
+
+    fn destroy_texture(&mut self, handle: TextureHandle) -> ChaosResult<()>;
+
+    fn create_sampler(&mut self, descriptor: &SamplerDescriptor) -> ChaosResult<SamplerHandle>;
+
+    fn destroy_sampler(&mut self, handle: SamplerHandle) -> ChaosResult<()>;
+
+    fn create_material_binding(
+        &mut self,
+        descriptor: &MaterialBindingDescriptor,
+    ) -> ChaosResult<MaterialBindingHandle>;
+
+    fn destroy_material_binding(&mut self, handle: MaterialBindingHandle) -> ChaosResult<()>;
 
     fn render(&mut self, plan: &FramePlan) -> ChaosResult<FrameOutcome>;
 }

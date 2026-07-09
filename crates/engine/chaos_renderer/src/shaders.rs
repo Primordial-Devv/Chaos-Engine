@@ -7,6 +7,24 @@ use crate::resources::ShaderSource;
 /// Noms des shaders intégrés du moteur (namespace `chaos.`).
 pub mod builtin {
     pub const VERTEX_COLOR: &str = "chaos.vertex_color";
+    pub const TEXTURED: &str = "chaos.textured";
+}
+
+/// Convention d'entrées des shaders — l'autorité UNIQUE des groupes et des
+/// slots de binding. Les shaders déclarent, le moteur fournit : groupes 0/1
+/// bindés automatiquement (uniforms de frame et d'objet), groupe 2 fourni
+/// par le contenu (ressources material — texture + sampler aujourd'hui,
+/// paramètres demain). Le backend et les WGSL intégrés s'y conforment —
+/// verrouillé par le test naga `builtin_shaders_follow_the_input_conventions`.
+pub mod inputs {
+    pub const FRAME_GROUP: u32 = 0;
+    pub const FRAME_UNIFORMS_BINDING: u32 = 0;
+    pub const OBJECT_GROUP: u32 = 1;
+    pub const OBJECT_UNIFORMS_BINDING: u32 = 0;
+    pub const MATERIAL_GROUP: u32 = 2;
+    pub const MATERIAL_TEXTURE_BINDING: u32 = 0;
+    pub const MATERIAL_SAMPLER_BINDING: u32 = 1;
+    pub const MATERIAL_UNIFORMS_BINDING: u32 = 2;
 }
 
 /// Bibliothèque de shaders du renderer : la maison des sources.
@@ -26,6 +44,10 @@ impl ShaderLibrary {
         library.register(
             builtin::VERTEX_COLOR,
             ShaderSource::Wgsl(String::from(include_str!("../shaders/vertex_color.wgsl"))),
+        );
+        library.register(
+            builtin::TEXTURED,
+            ShaderSource::Wgsl(String::from(include_str!("../shaders/textured.wgsl"))),
         );
         library
     }

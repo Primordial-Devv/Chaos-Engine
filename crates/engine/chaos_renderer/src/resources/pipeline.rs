@@ -47,6 +47,7 @@ pub struct PipelineDescriptor {
     pub topology: PrimitiveTopology,
     pub cull_mode: CullMode,
     pub front_face: FrontFace,
+    pub material: bool,
 }
 
 impl PipelineDescriptor {
@@ -60,6 +61,7 @@ impl PipelineDescriptor {
             topology: PrimitiveTopology::TriangleList,
             cull_mode: CullMode::None,
             front_face: FrontFace::Ccw,
+            material: false,
         }
     }
 
@@ -70,6 +72,14 @@ impl PipelineDescriptor {
 
     pub fn with_cull_mode(mut self, cull_mode: CullMode) -> Self {
         self.cull_mode = cull_mode;
+        self
+    }
+
+    /// Ajoute le groupe(2) material (texture + sampler + MaterialUniforms)
+    /// au layout du pipeline — le réglage des pipelines dont le shader lit
+    /// les ressources material (ex. `chaos.textured`).
+    pub fn with_material(mut self) -> Self {
+        self.material = true;
         self
     }
 }
