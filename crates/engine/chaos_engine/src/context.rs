@@ -1,14 +1,17 @@
+use chaos_assets::AssetManager;
 use chaos_core::Time;
 use chaos_renderer::Renderer;
 
 /// Vue du moteur offerte aux subsystems pendant leurs hooks.
-/// Porte les services partagés — le renderer aujourd'hui, les assets et
-/// autres ressources demain. `renderer` est `None` hors fenêtre (tests).
+/// Porte les services partagés : le renderer (`None` hors fenêtre — tests)
+/// et l'Asset Manager (toujours présent — aucune dépendance GPU), l'unique
+/// point d'entrée des ressources.
 #[derive(Default)]
 pub struct EngineContext {
     time: Time,
     exit_requested: bool,
     renderer: Option<Renderer>,
+    assets: AssetManager,
 }
 
 impl EngineContext {
@@ -31,6 +34,15 @@ impl EngineContext {
 
     pub fn renderer_mut(&mut self) -> Option<&mut Renderer> {
         self.renderer.as_mut()
+    }
+
+    /// L'Asset Manager du moteur — l'unique point d'entrée des ressources.
+    pub fn assets(&self) -> &AssetManager {
+        &self.assets
+    }
+
+    pub fn assets_mut(&mut self) -> &mut AssetManager {
+        &mut self.assets
     }
 
     pub(crate) fn set_time(&mut self, time: Time) {

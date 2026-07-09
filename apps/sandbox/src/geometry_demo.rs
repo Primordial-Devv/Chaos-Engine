@@ -1,13 +1,15 @@
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::path::PathBuf;
 
 use chaos_engine::{
-    Camera, ChaosResult, Color, ColorVertex, CullMode, DrawCommand, EngineContext, Event, Geometry,
-    MaterialDescriptor, MaterialHandle, MeshHandle, PipelineDescriptor, SamplerDescriptor,
-    SamplerFilter, Subsystem, TextureDescriptor, TextureFormat, TexturedGeometry, TexturedVertex,
+    Camera, ChaosError, ChaosResult, Color, ColorVertex, CullMode, DrawCommand, EngineContext,
+    Event, Geometry, MaterialDescriptor, MaterialHandle, MeshHandle, PipelineDescriptor,
+    SamplerDescriptor, SamplerFilter, Subsystem, TextureFormat, TexturedGeometry, TexturedVertex,
     Transform, WindowEvent,
+    assets::{AssetKind, AssetSource, ImportedAsset, texture_descriptor, textured_geometry},
     debug::DebugCameraController,
     math::{Quat, Vec3},
-    shaders, srgb8_bytes_of,
+    shaders,
 };
 
 const RING_COUNT: u8 = 8;
@@ -19,16 +21,15 @@ const TRIANGLES: [(Vec3, f32); 3] = [
 ];
 
 /// Démo multi-objets pilotée par les MATERIALS : chaque draw est le triplet
-/// mesh + material + transform. 4 meshes partagés (triangle, sol texturé,
-/// cube coloré, cube texturé), 4 pipelines, 4 materials — dont deux
-/// (`demo.floor` violet, `demo.cube` ambre) partageant le MÊME damier
-/// blanc/gris : la couleur vient du paramètre `base_color` du material, la
-/// texture reste neutre. 13 draws par frame : sol damier, cube central
-/// texturé en tumble (UV par face), ronde de 8 cubes colorés, trois
-/// triangles flottants. Toute géométrie est construite à l'origine et
-/// placée par le Transform de son DrawCommand ; la RenderQueue regroupe par
-/// material. N'utilise que le vocabulaire haut niveau — l'API d'un futur
-/// gamemode.
+/// mesh + material + transform. **Le sol vient de fichiers via l'Asset
+/// Pipeline** (texture `assets/textures/checker.ppm`, mesh
+/// `assets/models/floor.glb` — déclarés, importés puis cousus vers le
+/// renderer par `chaos_engine::assets`) ; le reste est procédural. 4 meshes
+/// partagés, 4 pipelines, 4 materials — dont deux (`demo.floor` violet,
+/// `demo.cube` ambre) partageant le MÊME damier : la couleur vient du
+/// `base_color` du material. 13 draws par frame. Lancer depuis la racine du
+/// workspace (chemins d'assets relatifs). N'utilise que le vocabulaire haut
+/// niveau — l'API d'un futur gamemode.
 #[derive(Default)]
 pub struct GeometryDemo {
     solid_material: Option<MaterialHandle>,
@@ -50,6 +51,38 @@ impl Subsystem for GeometryDemo {
     }
 
     fn init(&mut self, context: &mut EngineContext) -> ChaosResult<()> {
+        if context.renderer().is_none() {
+            return Ok(());
+        }
+
+        let assets = context.assets_mut();
+        let checker_id = assets.declare(
+            "textures/checker",
+            AssetKind::Texture,
+            AssetSource::File(PathBuf::from("assets/textures/checker.ppm")),
+        )?;
+        let checker_data = match assets.import(checker_id)? {
+            ImportedAsset::Texture(data) => data.clone(),
+            other => {
+                return Err(ChaosError::Asset(format!(
+                    "unexpected import kind for 'textures/checker': {other:?}"
+                )));
+            }
+        };
+        let floor_id = assets.declare(
+            "models/floor",
+            AssetKind::Mesh,
+            AssetSource::File(PathBuf::from("assets/models/floor.glb")),
+        )?;
+        let floor_data = match assets.import(floor_id)? {
+            ImportedAsset::Mesh(data) => data.clone(),
+            other => {
+                return Err(ChaosError::Asset(format!(
+                    "unexpected import kind for 'models/floor': {other:?}"
+                )));
+            }
+        };
+
         let Some(renderer) = context.renderer_mut() else {
             return Ok(());
         };
@@ -75,17 +108,10 @@ impl Subsystem for GeometryDemo {
             .with_material();
         let textured_pipeline = renderer.create_pipeline(&textured_solid)?;
 
-        let checker = renderer.create_texture(&TextureDescriptor::sampled(
+        let checker = renderer.create_texture(&texture_descriptor(
             "demo.checker",
-            2,
-            2,
+            &checker_data,
             TextureFormat::Rgba8UnormSrgb,
-            srgb8_bytes_of(&[
-                Color::WHITE,
-                Color::rgb(0.45, 0.45, 0.45),
-                Color::rgb(0.45, 0.45, 0.45),
-                Color::WHITE,
-            ]),
         ))?;
         let checker_sampler = renderer.create_sampler(
             &SamplerDescriptor::new("demo.checker_sampler").with_filter(SamplerFilter::Nearest),
@@ -121,7 +147,7 @@ impl Subsystem for GeometryDemo {
                 Color::rgb(0.20, 0.80, 0.95),
             ],
         );
-        let floor_quad = TexturedGeometry::quad([0.0, 0.0, 0.0], 1.0, 1.0, 4.0);
+        let floor_quad = textured_geometry("models/floor", &floor_data)?;
         let textured_cube = TexturedGeometry::cube([0.0, 0.0, 0.0], 1.0);
         let cube = Geometry::cube(
             [0.0, 0.0, 0.0],
