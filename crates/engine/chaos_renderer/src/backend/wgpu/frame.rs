@@ -4,6 +4,7 @@ use log::{debug, warn};
 use crate::frame::{FramePlan, FrameSkipReason};
 
 use crate::pool::PoolHandle;
+use crate::shaders::inputs;
 
 use super::WgpuBackend;
 use super::convert::{graphics_error, to_wgpu_color};
@@ -70,10 +71,11 @@ impl WgpuBackend {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main_pass.set_bind_group(0, &self.uniforms.frame_bind_group, &[]);
+            main_pass.set_bind_group(inputs::FRAME_GROUP, &self.uniforms.frame_bind_group, &[]);
             let mut bound_pipeline = None;
+            let mut bound_material = None;
             for (index, draw) in plan.draws.iter().enumerate() {
-                let Some(pipeline) = self.pipelines.get(draw.pipeline.index()) else {
+                let Some(entry) = self.pipelines.get(draw.pipeline.index()) else {
                     warn!("draw ignored: unknown pipeline {:?}", draw.pipeline);
                     continue;
                 };
@@ -82,10 +84,27 @@ impl WgpuBackend {
                     continue;
                 };
                 if bound_pipeline != Some(draw.pipeline.index()) {
-                    main_pass.set_pipeline(pipeline);
+                    main_pass.set_pipeline(&entry.pipeline);
                     bound_pipeline = Some(draw.pipeline.index());
                 }
-                main_pass.set_bind_group(1, object_bind_group, &[]);
+                main_pass.set_bind_group(inputs::OBJECT_GROUP, object_bind_group, &[]);
+                if entry.uses_material {
+                    let Some(binding_handle) = draw.binding else {
+                        warn!(
+                            "draw ignored: pipeline {:?} expects material resources",
+                            draw.pipeline
+                        );
+                        continue;
+                    };
+                    if bound_material != Some(binding_handle) {
+                        let Some(bind_group) = self.material_bindings.get(binding_handle) else {
+                            warn!("draw ignored: stale material binding {binding_handle:?}");
+                            continue;
+                        };
+                        main_pass.set_bind_group(inputs::MATERIAL_GROUP, bind_group, &[]);
+                        bound_material = Some(binding_handle);
+                    }
+                }
                 if let Some(buffer_handle) = draw.vertex_buffer {
                     let pool_handle = PoolHandle {
                         index: buffer_handle.index,

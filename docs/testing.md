@@ -1,6 +1,6 @@
 # Tests du moteur
 
-Tout se lance depuis la racine du workspace. Ce document couvre les phases 1 (cycle de vie, fenêtre, événements, boucle) et 2 (renderer minimal) ainsi que Rendering Core V1 et V2 (pipelines, géométrie, mesh, transforms, caméra, depth, RenderQueue) et s'étoffera à chaque phase.
+Tout se lance depuis la racine du workspace. Ce document couvre les phases 1 (cycle de vie, fenêtre, événements, boucle) et 2 (renderer minimal) ainsi que Rendering Core V1, V2 et V3 (pipelines, géométrie, mesh, transforms, caméra, depth, RenderQueue, textures, samplers, bindings, materials, cache) et s'étoffera à chaque phase.
 
 ## 1. Tests unitaires
 
@@ -12,7 +12,7 @@ cargo test --workspace
 |---|---|---|
 | `chaos_core` | 20 | Horloge de frame, Color, **Transform** (matrice, TRS, directions locales), **conventions mathématiques verrouillées** (main droite, column-major, rotations, profondeur 0..1), **Camera** (view inverse du transform, projection NDC centrée, composition P×V, aspect au viewport) |
 | `chaos_window` | 4 | Traduction winit → types maison : touches, boutons, états, fallback `Unknown` |
-| `chaos_renderer` | 46 | Orchestration via backend factice (plan de frame, outcomes, pipelines, shaders, buffers, meshes, **uniforms** : view-projection dans le plan, Transform → matrice modèle par draw), géométrie (dont le **cube** : enroulement CCW verrouillé, couleur par face), **RenderQueue** (tri stable par pipeline), **vertex layouts déclaratifs**, **pool générationnel**, + 3 tests d'intégration : 2 d'**isolation wgpu**, 1 **validation naga des `.wgsl` intégrés** |
+| `chaos_renderer` | 87 | Orchestration via backend factice (plan de frame, outcomes, pipelines, shaders, buffers, **textures** : forward du descripteur, validation dimensions/format/pixels portée par le descripteur (`validate()`) et appliquée avant le backend, **samplers** (défauts Linear+Repeat, builders), **bindings** (texture+sampler forward, binding par draw dans le plan), meshes, **uniforms** : view-projection dans le plan, Transform → matrice modèle par draw), géométrie (dont le **cube** : enroulement CCW verrouillé, couleur par face), **RenderQueue** (tri stable par pipeline), **vertex layouts déclaratifs**, **pool générationnel**, + 3 tests d'intégration : 2 d'**isolation wgpu**, 1 **validation naga des `.wgsl` intégrés** |
 | `chaos_engine` | 16 | Cycle de vie complet (init/shutdown ordonnés, exits, gating, échecs d'init, update → render) + **contrôleur de caméra debug** (avance selon forward, purge au focus perdu, rotation au drag droit seulement, pas de saut au premier mouvement, pitch clampé, vitesse bornée à la molette) |
 
 Les tests unitaires ne touchent jamais le GPU (la CI n'en a pas) : la validation
@@ -50,26 +50,33 @@ enregistré automatiquement en dernier).
 
 Le code de sortie doit être `0` (`echo $?` juste après).
 
-La fenêtre doit afficher la **scène multi-objets** — 13 draws par frame pour
-seulement **3 meshes partagés** : un **sol violet sombre** (quad 1×1 étiré en
-8×8 par une échelle non uniforme, posé à y=-1), le **cube central 6 couleurs**
-en rotation lente sur deux axes, une **ronde de 8 cubes** — le même mesh que
-le central — de tailles (0.3 → 0.72) et vitesses d'orbite/spin toutes
-différentes, et **trois triangles dégradés** flottants d'échelles distinctes.
-Les vitesses d'orbite différentes font que les cubes **se croisent en
-permanence** : l'occlusion doit rester correcte à chaque croisement (devant /
-derrière le cube central et entre eux). La scène traverse **deux pipelines** :
-les cubes fermés passent par `demo.geometry` (back-face culling — corrects
-sous tous les angles), sol et triangles par `demo.geometry.double_sided`
-(visibles des deux côtés — la sémantique correcte d'une géométrie plate). La
-démo soumet en ordre de scène ; la **RenderQueue** regroupe par pipeline avant
-le backend — visuellement invisible (géométrie opaque + depth buffer), c'est
-le point. **Au resize, les proportions sont conservées** (le sol reste carré,
+La fenêtre doit afficher la **scène pilotée par les materials** — 13 draws
+par frame (triplets mesh + material + transform) pour **4 meshes** et **4
+materials** : un **sol damier violet** (quad texturé 1×1 étiré en 8×8, posé
+à y=-1 — damier 2×2 **neutre blanc/gris** répété ×4 par le sampler
+`Nearest`+`Repeat`, teinté par le `base_color` violet du material
+`demo.floor`), un **cube central damier ambre** en rotation lente sur deux
+axes (`TexturedGeometry::cube` : UV 0..1 sur chaque face — le MÊME damier
+que le sol, teinté ambre par le material `demo.cube` : deux materials, une
+texture partagée), une **ronde de 8 cubes 6 couleurs** (mesh coloré partagé,
+material `demo.solid` sans texture → fallbacks builtin `chaos.white` +
+`chaos.default_sampler`) de tailles (0.3 → 0.72) et vitesses d'orbite/spin
+toutes différentes, et **trois triangles dégradés** flottants. Les vitesses
+d'orbite différentes font que les cubes **se croisent en permanence** :
+l'occlusion doit rester correcte à chaque croisement. La scène traverse
+**quatre pipelines** : `demo.geometry` (vertex color, back-face culling),
+`demo.geometry.double_sided` (triangles), `demo.floor` (texturé
+double-sided) et `demo.textured` (texturé cullé, le cube central). La démo
+soumet en ordre de scène ; la **RenderQueue** regroupe par material avant le
+backend — visuellement invisible (géométrie opaque + depth buffer), c'est le
+point. **Au resize, les proportions sont conservées** (le sol reste carré,
 les cubes ne s'étirent pas) : c'est la caméra qui gère l'aspect ratio, plus
-l'étirement NDC. Les logs `debug` montrent les deux pipelines, cinq buffers,
-trois meshes, et `object uniform slots grown to 13` — atteint une seule fois
-à la première frame, puis les slots sont réutilisés. Le log `renderer
-released` doit apparaître au shutdown, avant `engine stopped`.
+l'étirement NDC. Les logs `debug` montrent les quatre pipelines, sept
+buffers, quatre meshes, la texture damier, la texture de repli
+(`chaos.white`), les deux samplers, les quatre `material binding … created`,
+et `object uniform slots grown to 13` — atteint une seule fois à la première
+frame, puis les slots sont réutilisés. Le log `renderer released` doit
+apparaître au shutdown, avant `engine stopped`.
 
 ### Navigation debug dans la scène
 

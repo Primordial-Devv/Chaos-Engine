@@ -1,5 +1,7 @@
 use log::debug;
 
+use crate::shaders::inputs;
+
 const MATRIX_SIZE: u64 = 64;
 
 /// Mécanique des uniforms du backend — convention de binding du moteur :
@@ -21,11 +23,24 @@ struct ObjectSlot {
 
 impl Uniforms {
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let frame_layout = uniform_layout(device, "chaos.frame_uniforms");
-        let object_layout = uniform_layout(device, "chaos.object_uniforms");
+        let frame_layout = uniform_layout(
+            device,
+            "chaos.frame_uniforms",
+            inputs::FRAME_UNIFORMS_BINDING,
+        );
+        let object_layout = uniform_layout(
+            device,
+            "chaos.object_uniforms",
+            inputs::OBJECT_UNIFORMS_BINDING,
+        );
         let frame_buffer = uniform_buffer(device, "chaos.frame_uniforms");
-        let frame_bind_group =
-            uniform_bind_group(device, "chaos.frame_uniforms", &frame_layout, &frame_buffer);
+        let frame_bind_group = uniform_bind_group(
+            device,
+            "chaos.frame_uniforms",
+            &frame_layout,
+            &frame_buffer,
+            inputs::FRAME_UNIFORMS_BINDING,
+        );
         Self {
             frame_layout,
             object_layout,
@@ -44,7 +59,13 @@ impl Uniforms {
             let index = self.object_slots.len();
             let label = format!("chaos.object_uniforms.{index}");
             let buffer = uniform_buffer(device, &label);
-            let bind_group = uniform_bind_group(device, &label, &self.object_layout, &buffer);
+            let bind_group = uniform_bind_group(
+                device,
+                &label,
+                &self.object_layout,
+                &buffer,
+                inputs::OBJECT_UNIFORMS_BINDING,
+            );
             self.object_slots.push(ObjectSlot { buffer, bind_group });
             debug!("object uniform slots grown to {}", self.object_slots.len());
         }
@@ -61,11 +82,11 @@ impl Uniforms {
     }
 }
 
-fn uniform_layout(device: &wgpu::Device, label: &str) -> wgpu::BindGroupLayout {
+fn uniform_layout(device: &wgpu::Device, label: &str, binding: u32) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(label),
         entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
+            binding,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
@@ -91,12 +112,13 @@ fn uniform_bind_group(
     label: &str,
     layout: &wgpu::BindGroupLayout,
     buffer: &wgpu::Buffer,
+    binding: u32,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout,
         entries: &[wgpu::BindGroupEntry {
-            binding: 0,
+            binding,
             resource: buffer.as_entire_binding(),
         }],
     })

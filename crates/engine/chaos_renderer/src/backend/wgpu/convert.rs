@@ -7,7 +7,8 @@ use raw_window_handle::{
 };
 
 use crate::resources::{
-    CullMode, FrontFace, PrimitiveTopology, VertexAttributeFormat, VertexLayout, VertexStepMode,
+    CullMode, FrontFace, PrimitiveTopology, SamplerAddressMode, SamplerFilter, TextureFormat,
+    TextureUsage, VertexAttributeFormat, VertexLayout, VertexStepMode,
 };
 use crate::target::SurfaceTarget;
 
@@ -50,6 +51,14 @@ pub(super) fn mat4_to_bytes(matrix: Mat4) -> [u8; 64] {
     bytes
 }
 
+pub(super) fn color_to_bytes(color: Color) -> [u8; 16] {
+    let mut bytes = [0u8; 16];
+    for (index, value) in [color.r, color.g, color.b, color.a].iter().enumerate() {
+        bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
 pub(super) fn to_wgpu_color(color: Color) -> wgpu::Color {
     wgpu::Color {
         r: f64::from(color.r),
@@ -83,6 +92,46 @@ pub(super) fn to_wgpu_front_face(face: FrontFace) -> wgpu::FrontFace {
     }
 }
 
+pub(super) fn to_wgpu_texture_format(format: TextureFormat) -> wgpu::TextureFormat {
+    match format {
+        TextureFormat::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
+        TextureFormat::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+        TextureFormat::R8Unorm => wgpu::TextureFormat::R8Unorm,
+        TextureFormat::Rg8Unorm => wgpu::TextureFormat::Rg8Unorm,
+    }
+}
+
+pub(super) fn to_wgpu_texture_usages(usage: TextureUsage) -> wgpu::TextureUsages {
+    match usage {
+        TextureUsage::Sampled => {
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
+        }
+        TextureUsage::RenderTarget => {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+        }
+    }
+}
+
+/// Octets d'une rangée de texels ; saturé à u32::MAX en cas de débordement —
+/// wgpu rejette alors la copie sous error scope, jamais un panic.
+pub(super) fn texel_row_bytes(width: u32, bytes_per_pixel: u32) -> u32 {
+    u32::try_from(u64::from(width) * u64::from(bytes_per_pixel)).unwrap_or(u32::MAX)
+}
+
+pub(super) fn to_wgpu_filter_mode(filter: SamplerFilter) -> wgpu::FilterMode {
+    match filter {
+        SamplerFilter::Nearest => wgpu::FilterMode::Nearest,
+        SamplerFilter::Linear => wgpu::FilterMode::Linear,
+    }
+}
+
+pub(super) fn to_wgpu_address_mode(mode: SamplerAddressMode) -> wgpu::AddressMode {
+    match mode {
+        SamplerAddressMode::Repeat => wgpu::AddressMode::Repeat,
+        SamplerAddressMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+    }
+}
+
 pub(super) struct TargetHandles(pub(super) Box<dyn SurfaceTarget>);
 
 impl HasWindowHandle for TargetHandles {
@@ -94,5 +143,23 @@ impl HasWindowHandle for TargetHandles {
 impl HasDisplayHandle for TargetHandles {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         self.0.display_handle()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn texel_row_bytes_multiplies_width_by_texel_size() {
+        assert_eq!(texel_row_bytes(4, 4), 16);
+        assert_eq!(texel_row_bytes(3, 2), 6);
+        assert_eq!(texel_row_bytes(1, 1), 1);
+    }
+
+    #[test]
+    fn texel_row_bytes_saturates_instead_of_panicking() {
+        assert_eq!(texel_row_bytes(u32::MAX, 4), u32::MAX);
+        assert_eq!(texel_row_bytes(u32::MAX, 1), u32::MAX);
     }
 }

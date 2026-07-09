@@ -94,6 +94,36 @@ impl ColorVertex {
     }
 }
 
+/// Le deuxième vertex standard : position 3D + coordonnées de texture
+/// (origine en haut à gauche — convention verrouillée dans
+/// `docs/architecture/math-conventions.md`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TexturedVertex {
+    pub position: [f32; 3],
+    pub uv: [f32; 2],
+}
+
+impl TexturedVertex {
+    pub const SIZE: u32 = 20;
+
+    pub fn layout() -> VertexLayout {
+        VertexLayout::packed(&[
+            VertexAttributeFormat::Float32x3,
+            VertexAttributeFormat::Float32x2,
+        ])
+    }
+
+    pub fn bytes_of(vertices: &[TexturedVertex]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(vertices.len() * Self::SIZE as usize);
+        for vertex in vertices {
+            for value in vertex.position.iter().chain(vertex.uv.iter()) {
+                bytes.extend_from_slice(&value.to_ne_bytes());
+            }
+        }
+        bytes
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,6 +151,31 @@ mod tests {
         assert_eq!(layout.stride, ColorVertex::SIZE);
         assert_eq!(layout.attributes.len(), 2);
         assert_eq!(layout.attributes[1].offset, 12);
+    }
+
+    #[test]
+    fn textured_vertex_layout_matches_its_size() {
+        let layout = TexturedVertex::layout();
+        assert_eq!(layout.stride, TexturedVertex::SIZE);
+        assert_eq!(layout.attributes.len(), 2);
+        assert_eq!(layout.attributes[1].offset, 12);
+        assert_eq!(
+            layout.attributes[1].format,
+            VertexAttributeFormat::Float32x2
+        );
+    }
+
+    #[test]
+    fn textured_bytes_of_produces_interleaved_native_bytes() {
+        let vertices = [TexturedVertex {
+            position: [1.0, 2.0, 3.0],
+            uv: [0.25, 0.75],
+        }];
+        let bytes = TexturedVertex::bytes_of(&vertices);
+        assert_eq!(bytes.len(), TexturedVertex::SIZE as usize);
+        assert_eq!(bytes[..4], 1.0f32.to_ne_bytes());
+        assert_eq!(bytes[12..16], 0.25f32.to_ne_bytes());
+        assert_eq!(bytes[16..20], 0.75f32.to_ne_bytes());
     }
 
     #[test]

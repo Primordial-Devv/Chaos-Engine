@@ -23,16 +23,20 @@ chaos_renderer/src/
 ├── renderer.rs      Renderer — orchestrateur haut niveau + registre des meshes (+ tests mock)
 ├── frame.rs         DrawCommand / FrameDraw / FramePlan / FrameOutcome / FrameSkipReason
 ├── queue.rs         RenderQueue — ordre de rendu (tri stable par pipeline)
-├── geometry.rs      Geometry — données CPU + constructeurs triangle / quad / cube
+├── geometry.rs      Geometry + TexturedGeometry — données CPU, constructeurs triangle / quad / cube
+├── material.rs      MaterialDescriptor / MaterialHandle + MaterialRecord (pipeline + binding groupe 2)
 ├── mesh.rs          MeshHandle + MeshRecord (le mesh possède ses buffers)
 ├── pool.rs          ResourcePool générationnel (privé) — détection des handles périmés
-├── shaders.rs       ShaderLibrary + noms builtin (chaos.*)
+├── shaders.rs       ShaderLibrary + noms builtin (chaos.*) + convention inputs (groupes/slots)
 ├── target.rs        SurfaceTarget — couture raw-window-handle avec la fenêtre
 ├── resources/       vocabulaire des ressources, indépendant du backend
+│   ├── binding.rs       MaterialBindingDescriptor / MaterialBindingHandle (le groupe 2 vu du backend)
 │   ├── buffer.rs        BufferDescriptor / BufferHandle / BufferKind + bytes_of_*
 │   ├── pipeline.rs      PipelineDescriptor / PipelineHandle / topology / cull / front face
+│   ├── sampler.rs       SamplerDescriptor / SamplerHandle / filtre / adressage
 │   ├── shader.rs        ShaderRef (Named | Inline) / ShaderSource (Wgsl)
-│   └── vertex.rs        VertexLayout / VertexAttribute / ColorVertex
+│   ├── texture.rs       TextureDescriptor / TextureHandle / TextureFormat / TextureUsage
+│   └── vertex.rs        VertexLayout / VertexAttribute / ColorVertex / TexturedVertex
 └── backend/
     ├── mod.rs       trait GraphicsBackend + factory create_backend (choix du backend)
     └── wgpu/        module PRIVÉ — invisible hors de backend/
@@ -40,12 +44,16 @@ chaos_renderer/src/
         ├── setup.rs     chaîne d'initialisation (instance → surface → adapter → device)
         ├── frame.rs     acquisition de surface, encodage de la passe (couleur + profondeur), présentation
         ├── pipeline.rs  création des pipelines sous error scope (depth + culling)
+        ├── binding.rs   layout + bind groups material (texture/sampler/uniforms, pool générationnel)
         ├── buffer.rs    création/destruction des buffers GPU (pool générationnel)
+        ├── sampler.rs   création/destruction des samplers GPU (pool générationnel)
+        ├── texture.rs   création/upload/destruction des textures GPU (pool générationnel)
         ├── uniforms.rs  layouts group(0) frame / group(1) objet, slots par draw
         ├── depth.rs     texture/vue de profondeur (Depth32Float)
         └── convert.rs   frontière de traduction (couleurs, formats, matrices, erreurs)
 chaos_renderer/shaders/
-└── vertex_color.wgsl    shader builtin chaos.vertex_color (groups 0/1, P·V·M)
+├── vertex_color.wgsl    shader builtin chaos.vertex_color (groups 0/1, P·V·M)
+└── textured.wgsl        shader builtin chaos.textured (groups 0/1/2, sampling material)
 chaos_renderer/tests/
 ├── isolation.rs             le verrou : échoue si wgpu apparaît hors de backend/
 └── shader_validation.rs     le verrou naga : chaque WGSL embarqué doit compiler (nom + position sinon)
@@ -100,6 +108,29 @@ Quatre verrous rendent l'isolation mécanique, pas disciplinaire :
 **Rendering Core V2 : 10/10 — complet.** Chaos Engine rend une vraie scène 3D : caméra perspective pilotable, transforms par objet, profondeur, N objets organisés par une RenderQueue.
 
 Note : les maths du moteur passent par le point unique `chaos_core::math` (re-export glam). Conventions implémentées dès l'étape 1 (main droite, +Y haut, -Z avant), verrouillées à l'étape 2.
+
+## Feuille de route Rendering Core V3
+
+| Sous-étape | Destination | Statut |
+|---|---|---|
+| 1. Texture Concept | `resources/texture.rs` (descripteur, formats, usages, handle générationnel) + `backend/wgpu/texture.rs` (création/upload, pool) | ✅ |
+| 2. Texture Descriptors | `TextureDescriptor::validate()` — le descripteur est l'autorité de sa cohérence, point d'ancrage des règles mips/cubemaps | ✅ |
+| 3. GPU Texture Backend | `backend/wgpu/texture.rs` durci (arithmétique saturée, zéro panic) — preuve visuelle sur GPU réel au premier consommateur (samplers/bindings) | ✅ |
+| 4. Texture Upload | versant CPU : `rgba8_bytes_of` / `srgb8_bytes_of` (règle sRGB de référence, alpha linéaire) — l'upload GPU existait depuis l'étape 1 | ✅ |
+| 5. Sampler Concept | `resources/sampler.rs` (filtre Nearest/Linear, adressage Repeat/Clamp) + `backend/wgpu/sampler.rs` | ✅ |
+| 6. Resource Binding V1 | `resources/binding.rs` — TextureBinding au groupe(2), pipelines `with_texture_binding`, DrawCommand.binding ; premier sol texturé dans la démo | ✅ |
+| 7. Shader Inputs | `shaders::inputs` — l'autorité exécutable des groupes/slots, consommée par le backend, verrouillée par test naga | ✅ |
+| 8. Textured Shader | builtin `chaos.textured` (validé naga) + `TexturedVertex` (position + UV) + `TexturedGeometry::quad` + `create_textured_mesh` — le shader d'app provisoire disparaît | ✅ |
+| 9. Textured Pipeline | réalisé à l'étape 8 (pipeline `chaos.textured` + UV + uniforms + depth sur Metal) ; re-validé ici avec un second consommateur | ✅ |
+| 10. UV Support | `TexturedGeometry::cube` (24 sommets, UV 0..1 par face, CCW) — le cube central de la démo est texturé | ✅ |
+| 11. Material Concept V1 | `material.rs` — le concept de surface : pipeline + base_color + texture/sampler optionnels (fallbacks builtin) ; `DrawCommand` devient mesh + material + transform | ✅ |
+| 12. Material Binding | contrôle propre livré à l'étape 11 (résolution, possession, error scopes) + bind material unique par run de material dans la passe | ✅ |
+| 13. Texture Cache | `get_or_create_texture` — déduplication par clé logique (label), éviction au destroy, fallback auto-réparant ; la clé accueillera le chemin d'asset | ✅ |
+| 14. Lighting Preparation | `docs/renderer/lighting-preparation.md` — la carte d'atterrissage vérifiée de Lighting V1 (zéro code : la préparation est la forme de l'architecture) | ✅ |
+| 15. PBR Preparation | section « Material PBR — le plan d'évolution » du même document — slots fixes + fallbacks neutres, shaders valides sous layout élargi, descripteur additif | ✅ |
+| 16. Validation V3 | audit complet (code sain, isolation, docs), matrice portes + runs réels | ✅ |
+
+**Rendering Core V3 : 16/16 — complet.** Le renderer gère de vraies ressources graphiques : textures (upload sRGB correct, cache par clé logique), samplers, bindings conventionnés et verrouillés, materials haut niveau avec fallbacks — prêt à être nourri par l'Asset Pipeline.
 
 ## La couture avec la fenêtre : raw-window-handle
 
@@ -167,6 +198,7 @@ PipelineDescriptor ──► Renderer::create_pipeline ──► PipelineHandle 
 - **WGSL est le langage shader officiel du moteur** (`ShaderSource::Wgsl`) — compilable vers SPIR-V via naga pour un futur backend maison ; l'enum accueillera d'autres formats.
 - **Vertex layouts déclaratifs** : `PipelineDescriptor.vertex_layout: Option<VertexLayout>` (`None` = bufferless). Le layout est défini côté Chaos (`VertexAttributeFormat`, `VertexAttribute { location, format, offset }`, `step_mode Vertex|Instance` — l'instancing est préparé) et converti vers wgpu uniquement dans le backend. `VertexLayout::packed(&[formats])` calcule locations/offsets/stride ; `ColorVertex::layout()` décrit le vertex standard via ce système. UV/normales/tangentes/skinning = des attributs de plus ; un seul slot de layout pour l'instant (multi-slots avec l'instancing).
 - La cible couleur est implicitement le **format de la surface** (résolu par le backend) ; blend REPLACE — les cibles offscreen et le blending configurable viendront avec leurs phases. Tous les pipelines écrivent et testent la **profondeur** (voir ci-dessous).
+- **Ressources material** : `.with_material()` ajoute le groupe(2) au layout du pipeline — pour les shaders qui lisent texture/sampler/paramètres du material (sections Bindings et Materials).
 - **Culling** : `CullMode::None` par défaut ; `.with_cull_mode(CullMode::Back)` est le réglage standard des pipelines 3D opaques. Il repose sur la convention d'enroulement **CCW vu de l'extérieur** (`docs/architecture/math-conventions.md`) et rend les géométries 2D single-sided. La démo emploie les deux : pipeline cullé pour les cubes fermés, pipeline double-sided (le défaut) pour ses formes plates (sol, triangles).
 - Côté backend (`backend/wgpu/pipeline.rs`) : création sous **error scope wgpu** — un WGSL invalide ou un pipeline incohérent devient une `ChaosError::Graphics` propre, jamais un panic. Stockage en `Vec`, handle = index (suppression et générations viendront avec la gestion de ressources).
 - Exécution : `encode_frame` rejoue les `FrameDraw` du plan dans la passe ; un handle inconnu est ignoré avec un `warn!`, jamais de panic.
@@ -177,9 +209,9 @@ PipelineDescriptor ──► Renderer::create_pipeline ──► PipelineHandle 
 Les draws soumis via `Renderer::queue_draw` alimentent la **`RenderQueue`** (`queue.rs`) — le concept qui transforme une succession de draw calls improvisés en rendu organisé :
 
 - **Contrat** : la queue reçoit les soumissions en **ordre de scène** et rend l'**ordre de rendu** (`ordered()`) ; le `FramePlan` arrive au backend **déjà trié** et le backend exécute aveuglément. La politique (l'ordre) appartient au moteur, la mécanique (l'exécution) au backend.
-- **Clé V1 : le pipeline** — tri **stable** (`sort_by_key`) : le regroupement par pipeline minimise les changements d'état GPU, et l'ordre de soumission est préservé à clé égale (déterminisme). Le tri est légal car la géométrie est opaque : le depth buffer rend l'ordre d'exécution invisible à l'écran.
-- Premier bénéfice concret : le backend saute les `set_pipeline` redondants — la scène démo (13 draws, 2 pipelines) fait 2 binds au lieu de 13.
-- **Extensions prévues** — la clé grandit, le contrat ne change pas : passes de rendu, opaque/transparent (tri par profondeur), matériaux, ombres, debug rendering ; optimisations notées : buckets/dirty-flag, skip des binds de buffers (mesh partagé), instancing, dynamic offsets.
+- **Clé actuelle : le material** — tri **stable** (`sort_by_key`) : un material implique un pipeline et un bind group, le regroupement minimise les deux changements d'état, et l'ordre de soumission est préservé à clé égale (déterminisme). Le tri est légal car la géométrie est opaque : le depth buffer rend l'ordre d'exécution invisible à l'écran.
+- Le backend saute les `set_pipeline` **et** les `set_bind_group` material redondants entre draws consécutifs — le tri par material rend les deux économies effectives (N draws d'un même material = 1 bind de pipeline + 1 bind de material).
+- **Extensions prévues** — la clé grandit, le contrat ne change pas : passes de rendu, opaque/transparent (tri par profondeur), tri composite (pipeline, material), ombres, debug rendering ; optimisations notées : buckets/dirty-flag, skip des binds de buffers (mesh partagé), instancing, dynamic offsets.
 - Pure structure CPU, testée sans GPU (stabilité, regroupement, cycle de vie).
 
 ## Profondeur
@@ -198,7 +230,8 @@ Cinq réponses, une organisation minimale mais durable :
 | Question | Réponse |
 |---|---|
 | Où ils vivent | `chaos_renderer/shaders/*.wgsl` — de vrais fichiers, embarqués à la compilation (`include_str!`), zéro I/O runtime |
-| Comment identifiés | `ShaderLibrary` : noms nommespacés (`chaos.` pour les intégrés), constantes `shaders::builtin::*` — jamais de littéraux éparpillés |
+| Comment identifiés | `ShaderLibrary` : noms nommespacés (`chaos.` pour les intégrés), constantes `shaders::builtin::*` — jamais de littéraux éparpillés. Intégrés : `chaos.vertex_color` (position+couleur) et `chaos.textured` (position+UV, échantillonne le material du groupe 2) |
+| Ce qu'ils attendent | la convention `shaders::inputs` (groupes/slots) — verrouillée par le test naga des conventions |
 | Comment chargés | `with_builtins()` charge les intégrés ; `register()` pour matériaux/post-process/jeux ; `PipelineDescriptor.shader` est un `ShaderRef` (`Named` résolu via la bibliothèque, `Inline` pour le prototypage) ; le backend reçoit la source déjà résolue |
 | Comment les erreurs remontent | nom inconnu → `ChaosError::Graphics` explicite avant tout appel GPU ; WGSL invalide → test de validation **naga** en CI (message avec nom + ligne/colonne) ; création GPU → error scopes avec label |
 | Comment le futur s'y branche | le shader compiler/asset pipeline remplacera le *chargement*, pas l'organisation ; hot-reload via la bibliothèque ; naga (dev-dependency) est déjà l'outil du futur compiler WGSL → SPIR-V |
@@ -215,6 +248,60 @@ Ressources de données GPU, dans le vocabulaire du moteur :
 - Le pool (`backend/wgpu/pool.rs`) est **générique et testé sans GPU** ; il servira aux pipelines quand ils deviendront destructibles (pour l'instant `PipelineHandle` reste un index simple — rien ne se détruit).
 - À venir : vertex layouts déclaratifs (étape 10), uniform buffers avec les bind groups.
 
+## Textures
+
+Première ressource de la phase V3 : la texture est un **concept moteur**, jamais un type wgpu exposé. Même patron que les buffers — descripteur possédé, handle générationnel, mécanique confinée au backend :
+
+- **`TextureDescriptor`** (`label`, `width`/`height`, `format`, `usage`, `pixels: Vec<u8>`) — les pixels sont uploadés à la création, rangées serrées, **origine en haut à gauche** (convention verrouillée dans `math-conventions.md`). Constructeurs `sampled(...)` et `render_target(...)` ; `expected_byte_len()` donne la taille exacte attendue.
+- **`TextureFormat`** : `Rgba8UnormSrgb` (couleurs destinées à l'affichage — albedo, UI), `Rgba8Unorm` / `R8Unorm` / `Rg8Unorm` (données linéaires — normal maps, roughness/metallic). Le choix sRGB vs linéaire appartient au descripteur : le shader recevra toujours des valeurs linéaires. Les formats compressés/HDR s'ajouteront à l'enum avec leurs besoins.
+- **`TextureUsage`** : `Sampled` (uploadée puis échantillonnée) ou `RenderTarget` (cible de rendu échantillonnable) — le vocabulaire des cibles offscreen est prêt, leur consommation (render-to-texture) arrivera avec ses phases.
+- **Le descripteur porte ses règles de cohérence** (`TextureDescriptor::validate()`) : dimensions non nulles, `pixels.len()` exact pour une `Sampled`, aucune donnée initiale pour une `RenderTarget` — des erreurs explicites avec l'attendu et le reçu. Le Renderer l'applique avant tout appel GPU (testé au mock) ; le futur asset pipeline pourra valider une description sans Renderer ; mips et cubemaps y ancreront leurs propres règles.
+- **`TextureHandle` générationnel** — mêmes garanties que les buffers : handle périmé détecté (`destroy_texture` → erreur explicite), jamais de résolution silencieuse.
+- Côté backend (`backend/wgpu/texture.rs`) : `device.create_texture` + `queue.write_texture` sous error scope, pool générationnel dédié. Une texture est pour l'instant **2D, sans mips** ; mips, cubemaps et tableaux de couches étendront le descripteur le moment venu.
+- **Destruction propre, deux chemins** (parité buffers) : `destroy_texture` explicite (retrait du pool + drop), ou drop du backend au shutdown. wgpu gère la libération différée côté GPU — détruire une texture encore référencée par une frame en vol est sûr. Aucune arithmétique du backend ne peut paniquer : les tailles de rangée saturent (`texel_row_bytes`) et wgpu rejette la copie sous error scope.
+- **Versant CPU de l'upload** : `rgba8_bytes_of` / `srgb8_bytes_of` (patron `bytes_of_*` des buffers) convertissent des `Color` linéaires en texels — bruts pour les formats de **données**, encodés via la fonction de transfert sRGB de référence pour les formats d'**affichage** (l'alpha reste linéaire). C'est la règle anti « bug sRGB » : on n'écrit jamais du linéaire brut dans une texture sRGB. L'asset pipeline apportera ses propres octets décodés ; ces helpers servent le contenu procédural (démos, textures builtin, debug). Pas de mise à jour dynamique post-création (même règle que les buffers : elle viendra avec ses besoins réels).
+- **Cache par clé logique** (`get_or_create_texture`) : la clé est le `label` — l'identité logique de la texture, où l'asset pipeline mettra le chemin d'asset. Hit → handle existant ; miss → création. Contrat V1 : **la clé fait foi, pas le contenu**. `destroy_texture` évince l'entrée correspondante (un get ultérieur recrée) ; `create_texture` reste le chemin brut qui crée toujours. Futurs préparés, pas codés : hot reload = remplacement sous la même clé, refcount/éviction = gestion mémoire GPU, streaming.
+- La vue de texture est créée par le backend au moment du **binding** (son seul consommateur) ; le bind group la retient côté GPU.
+
+## Samplers
+
+Le sampler sépare la texture de la **manière dont elle est lue** — ressource moteur indépendante, un même sampler sert autant de textures que voulu :
+
+- **`SamplerDescriptor`** (`label`, `filter`, `address_mode`) — `new()` donne les défauts standard (**Linear + Repeat**), `with_filter(Nearest)` pour le pixel-art/damiers, `with_address_mode(ClampToEdge)` pour les textures UI non répétées.
+- **`SamplerHandle` générationnel**, mêmes garanties que buffers/textures (handle périmé → erreur explicite).
+- Côté backend (`backend/wgpu/sampler.rs`) : `device.create_sampler` sous error scope, pool dédié. L'**anisotropie** et les **samplers de comparaison** (ombres) étendront le descripteur avec leurs besoins réels ; le filtre mipmap arrivera avec les mips.
+
+## Bindings
+
+Le système de binding est la **convention à trois étages** — les shaders déclarent, le moteur fournit. L'autorité exécutable est **`shaders::inputs`** (constantes de groupes et de slots) : le backend les consomme (aucun littéral de groupe/slot dans le code) et le test naga `builtin_shaders_follow_the_input_conventions` échoue en CI si un shader intégré déclare un binding hors convention.
+
+| Groupe WGSL | Contenu | Géré par |
+|---|---|---|
+| `@group(0)` | `FrameUniforms { view_projection }` | moteur, automatique (1×/frame) |
+| `@group(1)` | `ObjectUniforms { model }` | moteur, automatique (slot par draw) |
+| `@group(2)` | ressources **material** : texture (0), sampler (1), `MaterialUniforms { base_color }` (2) | contenu, via Material |
+
+- Le groupe(2) appartient au **Material** (section suivante) — le `TextureBinding` de l'étape V3.6 (texture + sampler nus) a été absorbé : un seul layout de groupe(2), une seule voie de dessin. Côté backend, `MaterialBindingDescriptor` (texture/sampler résolus + base_color) → vue + buffer 16 o + bind group sous error scope, pool générationnel ; le bind group retient vue et sampler côté GPU — détruire la texture source ensuite est sûr.
+- **Opt-in par pipeline** : `PipelineDescriptor::with_material()` ajoute le groupe(2) au layout — le réglage des pipelines dont le shader lit les ressources material. Dérives observables, jamais fatales : binding manquant ou périmé → draw écarté avec `warn!` ; un pipeline sans groupe material ignore simplement le binding du material (cas normal : `chaos.vertex_color` n'en lit pas).
+- **Extensibilité** : les paramètres material grandiront dans `MaterialUniforms` (metallic/roughness pour le PBR) sans changer la convention ; le skip des binds redondants est l'optimisation notée.
+
+## Materials
+
+Le material est **LE concept de surface** du moteur — le draw est le triplet classique :
+
+```
+DrawCommand { mesh, material, transform }
+   mesh      = quelle géométrie          (MeshHandle)
+   material  = quelle apparence          (MaterialHandle : pipeline + couleur + texture + sampler)
+   transform = où dans le monde          (Transform)
+```
+
+- **`MaterialDescriptor`** (`new(label, pipeline)` + `with_base_color` / `with_texture` / `with_sampler`) → `create_material` → `MaterialHandle` générationnel. La texture et le sampler sont **optionnels** : fallbacks builtin `chaos.white` (1×1 blanche, servie par le cache de textures — recréée automatiquement si détruite) et `chaos.default_sampler` (Linear+Repeat), créés paresseusement au premier besoin puis partagés.
+- **`base_color`** est le premier « paramètre simple » (`MaterialUniforms`, buffer 16 o écrit à la création) : `chaos.textured` calcule `sample × base_color` — deux materials peuvent partager la même texture neutre et différer par la couleur (la démo le prouve : sol violet, cube ambre, même damier).
+- **Possession** : le material possède son binding GPU (détruit avec lui) ; texture et sampler référencés sont partageables et ne sont PAS détruits. Materials **immuables** V1 — la mise à jour des paramètres viendra avec ses besoins réels.
+- Le renderer résout material → (pipeline, bind group) en construisant le plan (material périmé → draw écarté avec `warn!`). La **RenderQueue** trie par material : un material implique un pipeline ET un bind group, le regroupement sert les deux états GPU.
+- **L'évolution vers le material PBR** (metallic/roughness, normal map, AO, emissive, IBL) est cartographiée et vérifiée dans `docs/renderer/lighting-preparation.md` — additive, sans refonte.
+
 ## Uniforms
 
 Le moteur parle en matrices et Transforms — jamais en bind groups. Convention de binding du moteur (généralisable : matériaux → group 2) :
@@ -223,6 +310,7 @@ Le moteur parle en matrices et Transforms — jamais en bind groups. Convention 
 |---|---|---|---|
 | `@group(0)` | `FrameUniforms { view_projection }` | 1× par frame | buffer 64 o unique, `queue.write_buffer` |
 | `@group(1)` | `ObjectUniforms { model }` | 1× par draw | pool de slots (buffer + bind group), réutilisés par index de draw, agrandi à la demande |
+| `@group(2)` | ressources material (sections Bindings/Materials) | par draw, si le pipeline l'a demandé | bind groups des materials, pool générationnel |
 
 - Côté abstraction : `Renderer::set_view_projection(Mat4)` (la caméra le fournit) et `DrawCommand.transform: Transform` (résolu en matrice modèle au plan). Le trait backend n'a gagné aucune méthode : les uniforms sont de la mécanique interne pilotée par le plan.
 - Tous les pipelines reçoivent le layout standard `[frame, objet]` ; `mat4_to_bytes` convertit sans allocation (column-major glam = layout WGSL).
@@ -234,7 +322,7 @@ La géométrie est une **donnée moteur**, distincte de sa représentation GPU e
 
 | Couche | Type |
 |---|---|
-| Données CPU | `Geometry` (`geometry.rs`) : `Vec<ColorVertex>` + indices u16 (vide = non indexé) ; constructeurs `triangle(center, size, colors)` / `quad(center, w, h, color)` / `cube(center, size, face_colors)` — debug lines, sphères, etc. seront des constructeurs de plus |
+| Données CPU | `Geometry` (`geometry.rs`) : `Vec<ColorVertex>` + indices u16 (vide = non indexé) ; constructeurs `triangle(center, size, colors)` / `quad(center, w, h, color)` / `cube(center, size, face_colors)` — debug lines, sphères, etc. seront des constructeurs de plus. **`TexturedGeometry`** : `Vec<TexturedVertex>` (position + UV, origine haut-gauche) ; `quad(center, w, h, uv_scale)` — l'unification des deux viendra avec l'asset pipeline |
 | Représentation GPU | buffers créés depuis `vertex_bytes()`/`index_bytes()` (étape 6) |
 | Usage | `DrawCommand { pipeline, vertex_buffer, index_buffer, element_count }` — `index_buffer` présent → `draw_indexed` (Uint16), sinon `draw` |
 
@@ -245,11 +333,11 @@ Le cube est la première géométrie **fermée** : 24 sommets (4 par face — un
 Le mesh est la **ressource de rendu de première classe** du moteur — c'est elle que consommeront asset system, scènes, ECS, éditeur et l'API de contenu (primitives aujourd'hui ; glTF, assets importés, outils et contenu utilisateur demain : tous aboutiront à `create_mesh`).
 
 ```
-Geometry (données CPU) ──► Renderer::create_mesh(label, &geometry) ──► MeshHandle
-                                    │ le mesh POSSÈDE ses buffers GPU
-DrawCommand { pipeline, mesh } ─────┤ Renderer::queue_draw
-                                    ▼ résolution au render_frame (registre générationnel)
-                       FrameDraw { buffers, element_count } ──► backend (inchangé)
+Geometry / TexturedGeometry ──► create_mesh / create_textured_mesh ──► MeshHandle
+                                          │ le mesh POSSÈDE ses buffers GPU
+DrawCommand { mesh, material, transform } ┤ Renderer::queue_draw
+                                          ▼ résolution au render_frame (registres générationnels)
+        FrameDraw { pipeline, buffers, element_count, model, binding } ──► backend
 ```
 
 - **Le mesh vit dans l'abstraction** : le backend ne connaît toujours que buffers et pipelines. Le `Renderer` tient le registre (pool générationnel partagé, `src/pool.rs`) et résout mesh → buffers en construisant le plan.
@@ -266,7 +354,7 @@ Présentation : `AutoVsync` si `RendererConfig::vsync` est actif, `AutoNoVsync` 
 
 ## Ce que les phases futures brancheront ici
 
-- **Triangle / pipelines** : pipeline de rendu, shaders (WGSL), vertex buffers — extension du contrat `GraphicsBackend`.
-- **Meshes, textures, matériaux, caméra, lumières** : nouvelles ressources exposées par `Renderer`, implémentées derrière le trait.
+- **Lighting V1** (normales, lumières, ombres, environment maps) : le plan d'accueil complet et vérifié est dans `docs/renderer/lighting-preparation.md`.
 - **Post-process, render graph** : orchestration au niveau `Renderer`, opaque pour le moteur.
+- **Asset pipeline** : images décodées → `TextureDescriptor` (clé de cache = chemin d'asset), meshes importés → `create_mesh`/unification des géométries.
 - **Mode headless** (serveur dédié) : un backend nul derrière le même trait.
