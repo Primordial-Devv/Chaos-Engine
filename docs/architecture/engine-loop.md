@@ -63,7 +63,7 @@ pub trait Subsystem {
 }
 ```
 
-`EngineContext` est la vue que le moteur offre aux subsystems (temps, demande d'arrêt) ; il accueillera plus tard les ressources partagées.
+`EngineContext` est la vue que le moteur offre aux subsystems : temps, demande d'arrêt, et les **services partagés** — à commencer par le Renderer (`context.renderer_mut()`, `None` hors fenêtre pour garder les subsystems testables sans GPU). C'est par ce canal que le contenu crée ses ressources GPU et soumet ses draws ; les futurs services (assets, etc.) suivront le même chemin.
 
 ## Temps et cadence
 

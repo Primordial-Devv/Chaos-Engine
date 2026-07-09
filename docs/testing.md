@@ -12,6 +12,7 @@ cargo test --workspace
 |---|---|---|
 | `chaos_core` | 5 | Avance de l'horloge de frame, delta borné à 250 ms, horloge figée → delta zéro, Color (rgb opaque, défaut noir) |
 | `chaos_window` | 4 | Traduction winit → types maison : touches, boutons, états, fallback `Unknown` |
+| `chaos_renderer` | 34 | Orchestration via backend factice (plan de frame, outcomes, pipelines, shaders, buffers, **meshes**), géométrie (primitives, indices valides), **vertex layouts déclaratifs** (`packed` : offsets/stride/locations, layout du vertex standard), **pool générationnel**, **validation naga des `.wgsl` intégrés**, + 2 tests d'isolation wgpu |
 | `chaos_engine` | 9 | Init dans l'ordre / shutdown en ordre inverse, `CloseRequested` → exit, dispatch des événements aux subsystems, `frame_limit`, gating de cadence (`target_fps`), échec d'init (seuls les subsystems initialisés sont arrêtés), update/redraw ignorés avant démarrage, séquence update → render |
 
 Les tests unitaires ne touchent jamais le GPU (la CI n'en a pas) : la validation
@@ -45,9 +46,12 @@ INFO  Chaos Sandbox stopped cleanly
 
 Le code de sortie doit être `0` (`echo $?` juste après).
 
-La fenêtre doit afficher la couleur de fond du sandbox (violet sombre), rendue
-par le GPU. Le log `renderer released` doit apparaître au shutdown, avant
-`engine stopped`.
+La fenêtre doit afficher **le triangle dégradé (rose/violet/cyan) à gauche et
+le quad violet à droite** sur le fond violet sombre — les deux chemins de rendu
+(non indexé et indexé) côte à côte, via les primitives `Geometry` du moteur.
+Les logs `debug` montrent le pipeline `demo.geometry` et trois buffers
+(`demo.triangle` 72 o, `demo.quad` 96 o, `demo.quad.indices` 12 o). Le log
+`renderer released` doit apparaître au shutdown, avant `engine stopped`.
 
 ## 3. Test interactif du cycle de vie
 
