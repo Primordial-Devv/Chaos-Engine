@@ -18,18 +18,37 @@ chaos_engine ──► Renderer (API orientée moteur, vocabulaire chaos_core)
 
 ```
 chaos_renderer/src/
-├── lib.rs           façade publique : Renderer, RendererConfig, GraphicsBackend, SurfaceTarget
+├── lib.rs           façade publique : Renderer, RenderQueue, Geometry, MeshHandle, descripteurs…
 ├── config.rs        RendererConfig — paramètres d'attachement (dimensions, vsync)
-├── renderer.rs      Renderer — orchestrateur haut niveau (+ tests avec backend factice)
+├── renderer.rs      Renderer — orchestrateur haut niveau + registre des meshes (+ tests mock)
+├── frame.rs         DrawCommand / FrameDraw / FramePlan / FrameOutcome / FrameSkipReason
+├── queue.rs         RenderQueue — ordre de rendu (tri stable par pipeline)
+├── geometry.rs      Geometry — données CPU + constructeurs triangle / quad / cube
+├── mesh.rs          MeshHandle + MeshRecord (le mesh possède ses buffers)
+├── pool.rs          ResourcePool générationnel (privé) — détection des handles périmés
+├── shaders.rs       ShaderLibrary + noms builtin (chaos.*)
 ├── target.rs        SurfaceTarget — couture raw-window-handle avec la fenêtre
+├── resources/       vocabulaire des ressources, indépendant du backend
+│   ├── buffer.rs        BufferDescriptor / BufferHandle / BufferKind + bytes_of_*
+│   ├── pipeline.rs      PipelineDescriptor / PipelineHandle / topology / cull / front face
+│   ├── shader.rs        ShaderRef (Named | Inline) / ShaderSource (Wgsl)
+│   └── vertex.rs        VertexLayout / VertexAttribute / ColorVertex
 └── backend/
     ├── mod.rs       trait GraphicsBackend + factory create_backend (choix du backend)
     └── wgpu/        module PRIVÉ — invisible hors de backend/
-        ├── mod.rs       WgpuBackend : état GPU + rendu de frame
+        ├── mod.rs       WgpuBackend : état GPU, resize, orchestration du rendu
         ├── setup.rs     chaîne d'initialisation (instance → surface → adapter → device)
-        └── convert.rs   frontière de traduction (couleurs, handles, erreurs)
+        ├── frame.rs     acquisition de surface, encodage de la passe (couleur + profondeur), présentation
+        ├── pipeline.rs  création des pipelines sous error scope (depth + culling)
+        ├── buffer.rs    création/destruction des buffers GPU (pool générationnel)
+        ├── uniforms.rs  layouts group(0) frame / group(1) objet, slots par draw
+        ├── depth.rs     texture/vue de profondeur (Depth32Float)
+        └── convert.rs   frontière de traduction (couleurs, formats, matrices, erreurs)
+chaos_renderer/shaders/
+└── vertex_color.wgsl    shader builtin chaos.vertex_color (groups 0/1, P·V·M)
 chaos_renderer/tests/
-└── isolation.rs     le verrou : échoue si wgpu apparaît hors de backend/
+├── isolation.rs             le verrou : échoue si wgpu apparaît hors de backend/
+└── shader_validation.rs     le verrou naga : chaque WGSL embarqué doit compiler (nom + position sinon)
 ```
 
 ## Garanties d'isolation
@@ -63,7 +82,24 @@ Quatre verrous rendent l'isolation mécanique, pas disciplinaire :
 
 **Rendering Core V1 : 10/10 — complet.**
 
-Ces fichiers n'existent pas encore : ils naissent avec leur sous-étape, jamais en stub vide.
+## Feuille de route Rendering Core V2
+
+| Sous-étape | Destination | Statut |
+|---|---|---|
+| 1. Transform System | `chaos_core::{math, transform}` — glam devient la fondation mathématique | ✅ |
+| 2. Math Conventions | `docs/architecture/math-conventions.md` + constantes `math::world` + tests de verrouillage | ✅ |
+| 3. Uniform Management | convention group(0)=frame / group(1)=objet, slots par draw, `backend/wgpu/uniforms.rs` | ✅ |
+| 4. Camera | `chaos_core::Camera` (view = inverse du transform, projection bénie, `set_viewport`) + `Renderer::surface_size` | ✅ |
+| 5. Debug Camera Controller | `chaos_engine::debug::DebugCameraController` (drag droit + WASD physiques, molette vitesse) | ✅ |
+| 6. Depth Buffer | `backend/wgpu/depth.rs` — attachement de profondeur dans la passe, test Less sur tous les pipelines | ✅ |
+| 7. Cube 3D | `Geometry::cube` (24 sommets, couleur par face, CCW extérieur) + premier Transform non-identité + back-face culling | ✅ |
+| 8. Multiple Objects | preuve N objets : mesh partagé × N draws, transforms par frame, slots d'uniforms réutilisés — zéro code moteur nouveau | ✅ |
+| 9. Render Queue V1 | `queue.rs` — `RenderQueue`, tri stable par pipeline, contrat « plan déjà en ordre de rendu » | ✅ |
+| 10. Validation V2 | audit complet (code sain, isolation, docs), matrice portes + runs réels | ✅ |
+
+**Rendering Core V2 : 10/10 — complet.** Chaos Engine rend une vraie scène 3D : caméra perspective pilotable, transforms par objet, profondeur, N objets organisés par une RenderQueue.
+
+Note : les maths du moteur passent par le point unique `chaos_core::math` (re-export glam). Conventions implémentées dès l'étape 1 (main droite, +Y haut, -Z avant), verrouillées à l'étape 2.
 
 ## La couture avec la fenêtre : raw-window-handle
 
@@ -93,7 +129,7 @@ L'abstraction décrit le **quoi** (`FramePlan` : clear color aujourd'hui, draw c
 
 ```
 Renderer::render_frame()
-  ├─ construction du FramePlan (état du renderer)
+  ├─ construction du FramePlan (ordre de la RenderQueue + état du renderer)
   └─ GraphicsBackend::render(plan)
        ├─ garde zéro-aire            fenêtre 0×0 → Skipped(ZeroArea)
        ├─ acquire_frame()            acquisition de la texture de surface
@@ -130,10 +166,30 @@ PipelineDescriptor ──► Renderer::create_pipeline ──► PipelineHandle 
 
 - **WGSL est le langage shader officiel du moteur** (`ShaderSource::Wgsl`) — compilable vers SPIR-V via naga pour un futur backend maison ; l'enum accueillera d'autres formats.
 - **Vertex layouts déclaratifs** : `PipelineDescriptor.vertex_layout: Option<VertexLayout>` (`None` = bufferless). Le layout est défini côté Chaos (`VertexAttributeFormat`, `VertexAttribute { location, format, offset }`, `step_mode Vertex|Instance` — l'instancing est préparé) et converti vers wgpu uniquement dans le backend. `VertexLayout::packed(&[formats])` calcule locations/offsets/stride ; `ColorVertex::layout()` décrit le vertex standard via ce système. UV/normales/tangentes/skinning = des attributs de plus ; un seul slot de layout pour l'instant (multi-slots avec l'instancing).
-- La cible couleur est implicitement le **format de la surface** (résolu par le backend) ; blend REPLACE, pas de depth — les cibles offscreen, le blending configurable et le depth viendront avec leurs phases.
+- La cible couleur est implicitement le **format de la surface** (résolu par le backend) ; blend REPLACE — les cibles offscreen et le blending configurable viendront avec leurs phases. Tous les pipelines écrivent et testent la **profondeur** (voir ci-dessous).
+- **Culling** : `CullMode::None` par défaut ; `.with_cull_mode(CullMode::Back)` est le réglage standard des pipelines 3D opaques. Il repose sur la convention d'enroulement **CCW vu de l'extérieur** (`docs/architecture/math-conventions.md`) et rend les géométries 2D single-sided. La démo emploie les deux : pipeline cullé pour les cubes fermés, pipeline double-sided (le défaut) pour ses formes plates (sol, triangles).
 - Côté backend (`backend/wgpu/pipeline.rs`) : création sous **error scope wgpu** — un WGSL invalide ou un pipeline incohérent devient une `ChaosError::Graphics` propre, jamais un panic. Stockage en `Vec`, handle = index (suppression et générations viendront avec la gestion de ressources).
-- Exécution : `encode_frame` rejoue les `DrawCommand` du plan dans la passe (`set_pipeline` + `draw`) ; un handle inconnu est ignoré avec un `warn!`, jamais de panic.
-- La file de draws du `Renderer` est vidée à chaque frame (immediate mode) — le scene graph la remplira plus tard.
+- Exécution : `encode_frame` rejoue les `FrameDraw` du plan dans la passe ; un handle inconnu est ignoré avec un `warn!`, jamais de panic.
+- Les draws soumis vivent dans la **RenderQueue** (section dédiée ci-dessous) avec la **durée de vie d'une frame de simulation** : le moteur la vide au début de chaque update (`clear_draws`), et toutes les présentations intermédiaires (rafales de redraw du resize interactif) re-présentent la même file — jamais de frame vide entre deux updates. Le scene graph alimentera cette file plus tard.
+
+## Render Queue
+
+Les draws soumis via `Renderer::queue_draw` alimentent la **`RenderQueue`** (`queue.rs`) — le concept qui transforme une succession de draw calls improvisés en rendu organisé :
+
+- **Contrat** : la queue reçoit les soumissions en **ordre de scène** et rend l'**ordre de rendu** (`ordered()`) ; le `FramePlan` arrive au backend **déjà trié** et le backend exécute aveuglément. La politique (l'ordre) appartient au moteur, la mécanique (l'exécution) au backend.
+- **Clé V1 : le pipeline** — tri **stable** (`sort_by_key`) : le regroupement par pipeline minimise les changements d'état GPU, et l'ordre de soumission est préservé à clé égale (déterminisme). Le tri est légal car la géométrie est opaque : le depth buffer rend l'ordre d'exécution invisible à l'écran.
+- Premier bénéfice concret : le backend saute les `set_pipeline` redondants — la scène démo (13 draws, 2 pipelines) fait 2 binds au lieu de 13.
+- **Extensions prévues** — la clé grandit, le contrat ne change pas : passes de rendu, opaque/transparent (tri par profondeur), matériaux, ombres, debug rendering ; optimisations notées : buckets/dirty-flag, skip des binds de buffers (mesh partagé), instancing, dynamic offsets.
+- Pure structure CPU, testée sans GPU (stabilité, regroupement, cycle de vie).
+
+## Profondeur
+
+Le depth buffer est de la **pure mécanique de backend** : ni `FramePlan`, ni `Renderer`, ni le trait `GraphicsBackend`, ni les shaders n'en savent rien — l'occlusion 3D est devenue correcte sans toucher un seul type public.
+
+- **Format** : `Depth32Float` (`backend/wgpu/depth.rs`), le format profondeur portable de référence.
+- **Cycle de vie** : la texture suit la surface — créée à l'init, recréée au resize (la garde 0×0 suspend le rendu avant d'y arriver), droppée avec le backend. `Lost`/`Outdated` reconfigurent la surface sans changer les dimensions : la vue reste valide.
+- **La passe** : clear à `1.0` chaque frame (le plus lointain — profondeur wgpu 0..1, nos conventions), `store: Discard` — personne ne relit la profondeur pour l'instant, optimal sur GPU tile-based.
+- **Les pipelines** : écriture activée, comparaison `Less` (plus proche = plus petit). Les pipelines sans test de profondeur (UI, post-process) arriveront avec leur premier consommateur ; le **reverse-Z** est noté comme future optimisation de précision.
 
 ## Shaders
 
@@ -159,17 +215,30 @@ Ressources de données GPU, dans le vocabulaire du moteur :
 - Le pool (`backend/wgpu/pool.rs`) est **générique et testé sans GPU** ; il servira aux pipelines quand ils deviendront destructibles (pour l'instant `PipelineHandle` reste un index simple — rien ne se détruit).
 - À venir : vertex layouts déclaratifs (étape 10), uniform buffers avec les bind groups.
 
+## Uniforms
+
+Le moteur parle en matrices et Transforms — jamais en bind groups. Convention de binding du moteur (généralisable : matériaux → group 2) :
+
+| Groupe WGSL | Contenu | Fréquence | Mécanique backend |
+|---|---|---|---|
+| `@group(0)` | `FrameUniforms { view_projection }` | 1× par frame | buffer 64 o unique, `queue.write_buffer` |
+| `@group(1)` | `ObjectUniforms { model }` | 1× par draw | pool de slots (buffer + bind group), réutilisés par index de draw, agrandi à la demande |
+
+- Côté abstraction : `Renderer::set_view_projection(Mat4)` (la caméra le fournit) et `DrawCommand.transform: Transform` (résolu en matrice modèle au plan). Le trait backend n'a gagné aucune méthode : les uniforms sont de la mécanique interne pilotée par le plan.
+- Tous les pipelines reçoivent le layout standard `[frame, objet]` ; `mat4_to_bytes` convertit sans allocation (column-major glam = layout WGSL).
+- Optimisation prévue pour le render queue : dynamic offsets sur un buffer unique au lieu d'un slot par draw.
+
 ## Géométrie
 
 La géométrie est une **donnée moteur**, distincte de sa représentation GPU et de son usage :
 
 | Couche | Type |
 |---|---|
-| Données CPU | `Geometry` (`geometry.rs`) : `Vec<ColorVertex>` + indices u16 (vide = non indexé) ; constructeurs `triangle(center, size, colors)` / `quad(center, w, h, color)` — cube et debug lines seront des constructeurs de plus |
+| Données CPU | `Geometry` (`geometry.rs`) : `Vec<ColorVertex>` + indices u16 (vide = non indexé) ; constructeurs `triangle(center, size, colors)` / `quad(center, w, h, color)` / `cube(center, size, face_colors)` — debug lines, sphères, etc. seront des constructeurs de plus |
 | Représentation GPU | buffers créés depuis `vertex_bytes()`/`index_bytes()` (étape 6) |
 | Usage | `DrawCommand { pipeline, vertex_buffer, index_buffer, element_count }` — `index_buffer` présent → `draw_indexed` (Uint16), sinon `draw` |
 
-Le « center » est cuit dans les sommets en attendant les transformations/caméra (uniforms).
+Le cube est la première géométrie **fermée** : 24 sommets (4 par face — une couleur par face exige des sommets non partagés, la topologie qu'exigeront normales/UVs), 36 indices, faces ordonnées **+X, -X, +Y, -Y, +Z, -Z**, enroulement **CCW vu de l'extérieur** (convention verrouillée par test — voir `docs/architecture/math-conventions.md`). Depuis l'étape 8, toute géométrie de la démo est construite **à l'origine** et placée exclusivement par le `Transform` de son `DrawCommand` ; le paramètre `center` des constructeurs reste disponible pour cuire un offset local quand c'est pertinent.
 
 ## Meshes
 
@@ -184,8 +253,9 @@ DrawCommand { pipeline, mesh } ─────┤ Renderer::queue_draw
 ```
 
 - **Le mesh vit dans l'abstraction** : le backend ne connaît toujours que buffers et pipelines. Le `Renderer` tient le registre (pool générationnel partagé, `src/pool.rs`) et résout mesh → buffers en construisant le plan.
+- **Un mesh = une ressource, un draw = un usage** : le même `MeshHandle` peut être soumis N fois par frame avec des transforms différents — mêmes buffers GPU, une matrice modèle par draw (slot d'uniform par index, réutilisé chaque frame). Verrouillé par test mock ; la ronde de la démo dessine 8 cubes d'un seul mesh. L'instancing GPU sera l'optimisation de ce motif.
 - **Durée de vie** : `destroy_mesh` détruit le record ET ses buffers ; handle périmé → erreur explicite ; un draw sur mesh détruit est écarté du plan avec un `warn!`, jamais de panic.
-- Le record porte déjà le **vertex format** (`VertexInput`) ; les **bounds** (AABB) s'y logeront quand le culling en aura besoin. La validation croisée pipeline↔mesh est notée pour plus tard.
+- Le record porte déjà le **vertex format** (`VertexLayout`) ; les **bounds** (AABB) s'y logeront quand le culling en aura besoin. La validation croisée pipeline↔mesh est notée pour plus tard.
 - `create_buffer`/`destroy_buffer` restent publics pour les usages avancés, mais les apps parlent mesh.
 
 Présentation : `AutoVsync` si `RendererConfig::vsync` est actif, `AutoNoVsync` sinon — le défaut du moteur est vsync **off**, car un present bloquant sur le main thread rend les interactions fenêtre laggy sur macOS (winit #1737) ; la cadence est régulée par `target_fps` côté moteur. Delta d'horloge borné côté moteur.

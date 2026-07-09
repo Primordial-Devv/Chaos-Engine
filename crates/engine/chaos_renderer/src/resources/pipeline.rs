@@ -67,4 +67,9 @@ impl PipelineDescriptor {
         self.vertex_layout = Some(vertex_layout);
         self
     }
+
+    pub fn with_cull_mode(mut self, cull_mode: CullMode) -> Self {
+        self.cull_mode = cull_mode;
+        self
+    }
 }

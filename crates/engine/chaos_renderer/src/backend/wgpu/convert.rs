@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use chaos_core::math::Mat4;
 use chaos_core::{ChaosError, Color};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
@@ -39,6 +40,14 @@ pub(super) fn to_wgpu_vertex_attributes(layout: &VertexLayout) -> Vec<wgpu::Vert
 
 pub(super) fn graphics_error(error: impl Display) -> ChaosError {
     ChaosError::Graphics(error.to_string())
+}
+
+pub(super) fn mat4_to_bytes(matrix: Mat4) -> [u8; 64] {
+    let mut bytes = [0u8; 64];
+    for (index, value) in matrix.to_cols_array().iter().enumerate() {
+        bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes
 }
 
 pub(super) fn to_wgpu_color(color: Color) -> wgpu::Color {

@@ -32,7 +32,8 @@ Engine::run()
        ├─ on_update()                        chaque frame (about_to_wait) :
        │    ├─ gating : rien avant l'échéance de frame (target_fps)
        │    ├─ FrameClock::tick()            delta borné (max 250 ms)
-       │    ├─ update de chaque subsystem    phase simulation
+       │    ├─ clear_draws()                 la RenderQueue repart vide
+       │    ├─ update de chaque subsystem    phase simulation (soumission des draws)
        │    ├─ frame_limit éventuel
        │    └─ request_redraw()
        ├─ frame_deadline()                   → ControlFlow::WaitUntil(échéance)
@@ -73,7 +74,6 @@ pub trait Subsystem {
 
 ## Points d'accroche prévus (non implémentés)
 
-- **Renderer** : `WindowHandle` exposera les raw handles nécessaires à la création de surface ; `request_redraw` existe déjà.
 - **Physique** : un pas de temps fixe (accumulateur) viendra compléter l'update à pas variable.
 - **Runtime/plateforme** : `sandbox` dépend directement de `chaos_engine` pour le bring-up ; il rebasculera sur `chaos_runtime` quand la couche plateforme prendra vie.
 - **Logging** : les crates n'utilisent que la façade `log` ; un passage à `tracing` ne toucherait que les consommateurs (apps).
