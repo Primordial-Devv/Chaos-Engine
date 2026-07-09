@@ -46,11 +46,11 @@ cargo clippy --workspace --all-targets
 
 ## Statut
 
-Rendering Core V1, V2 et V3 terminés : le moteur affiche une **vraie scène 3D pilotée par des materials** — caméra perspective au contrôleur debug (vol libre), transforms par objet, depth buffer, RenderQueue triée par material, meshes colorés et **texturés** (UV, damier sRGB procédural, sampler Nearest/Repeat), **materials haut niveau** (pipeline + couleur de base + texture/sampler optionnels avec fallbacks builtin et cache de textures) — le tout sur des conventions verrouillées par tests (maths main droite, enroulement CCW, bindings `shaders::inputs`, validation naga en CI) et **wgpu strictement confiné dans `chaos_renderer/src/backend/`** (verrou d'isolation en CI). 127 tests. Architecture : `docs/architecture/engine-loop.md`, `docs/architecture/math-conventions.md` et `docs/renderer/overview.md` ; l'accueil du lighting et du PBR est cartographié dans `docs/renderer/lighting-preparation.md`.
+Rendering Core (V1-V3) et **Asset Pipeline** terminés : le moteur affiche une **vraie scène 3D pilotée par des materials** et nourrie par son pipeline d'assets (identité stable `AssetId`, registre central, I/O confinée dans `chaos_assets`, importeurs extensibles PPM/WGSL/**glTF-GLB**, cache et durée de vie gouvernés, primitives de hot reload — le sol de la démo vient de fichiers réels dans `assets/`) — caméra perspective au contrôleur debug (vol libre), transforms par objet, depth buffer, RenderQueue triée par material, meshes colorés et **texturés** (UV, damier sRGB procédural, sampler Nearest/Repeat), **materials haut niveau** (pipeline + couleur de base + texture/sampler optionnels avec fallbacks builtin et cache de textures) — le tout sur des conventions verrouillées par tests (maths main droite, enroulement CCW, bindings `shaders::inputs`, validation naga en CI) et **wgpu strictement confiné dans `chaos_renderer/src/backend/`** (verrou d'isolation en CI). 127 tests. Architecture : `docs/architecture/engine-loop.md`, `docs/architecture/math-conventions.md` et `docs/renderer/overview.md` ; l'accueil du lighting et du PBR est cartographié dans `docs/renderer/lighting-preparation.md`.
 
 ```sh
 cargo run -p sandbox
 CHAOS_FRAME_LIMIT=180 cargo run -p sandbox
 ```
 
-Prochaines phases : Asset Pipeline, ECS, scènes, physique, audio, réseau, runtime/plateforme.
+Prochaines phases : ECS, scènes, éditeur, physique, audio, réseau, runtime/plateforme.

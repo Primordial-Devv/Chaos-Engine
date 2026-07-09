@@ -7,5 +7,6 @@ Conventions transverses :
 - `versioning.md` — versioning technique `MAJOR.MINOR.PATCH(+BUILD)` et nom public `Chaos N`.
 - `architecture/math-conventions.md` — conventions mathématiques d'autorité : repère main droite, +Y haut, -Z avant, TRS, quaternions, MVP, NDC wgpu.
 - `renderer/lighting-preparation.md` — le plan d'accueil vérifié de Lighting V1 et Material PBR (rien d'implémenté : la carte des points d'atterrissage).
+- `assets/overview.md` — l'Asset Pipeline : le producteur des ressources (identité stable `AssetId`, noms logiques, règles de la phase 3).
 - `git-workflow.md` — modèle de branches (`main`/`dev`/branches de travail), cycle de PR et rôle de la CI.
 - `testing.md` — tous les tests exécutables : unitaires, end-to-end sandbox, trace des événements, portes de qualité.

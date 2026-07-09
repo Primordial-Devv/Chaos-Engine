@@ -10,10 +10,11 @@ cargo test --workspace
 
 | Crate | Tests | Ce qui est vérifié |
 |---|---|---|
-| `chaos_core` | 20 | Horloge de frame, Color, **Transform** (matrice, TRS, directions locales), **conventions mathématiques verrouillées** (main droite, column-major, rotations, profondeur 0..1), **Camera** (view inverse du transform, projection NDC centrée, composition P×V, aspect au viewport) |
+| `chaos_core` | 25 | Horloge de frame, Color, **Transform** (matrice, TRS, directions locales), **conventions mathématiques verrouillées** (main droite, column-major, rotations, profondeur 0..1), **Camera** (view inverse du transform, projection NDC centrée, composition P×V, aspect au viewport), **AssetId** (identité déterministe, algorithme FNV-1a verrouillé par vecteurs de référence) |
 | `chaos_window` | 4 | Traduction winit → types maison : touches, boutons, états, fallback `Unknown` |
+| `chaos_assets` | 66 | **AssetRegistry** : enregistrement (id documenté, doublon rejeté en nommant l'existant), lookup nom → id, listage, transitions d'état (loaded/failed/unloaded, id inconnu rejeté) ; **AssetManager** : cycle de vie complet sur fichiers temporaires réels (roundtrip, cache prouvé par suppression du fichier, échec I/O → état Failed consultable, procédural non chargeable, unload idempotent + rechargement) ; **importeurs** : PPM P6 (décodage RGBA exact, commentaires, malformations nommées), WGSL (UTF-8), **glTF** (GLB construit octet par octet en test : positions/UV/indices exacts, UV zéros, séquence d'indices générée, non-TRIANGLES et buffers externes rejetés, octets corrompus nommés ; `.gltf` auto-suffisant via data URI base64, décodeur verrouillé par vecteurs RFC 4648), import de bout en bout, routage kind+extension, importeur custom enregistré, importeur manquant → Failed ; **durée de vie** : acquire/release (mutualisation prouvée), unload protégé par la rétention, évincement des non-retenus, cycle streaming acquire → release → evict → reload ; **porte de validation** : règles sémantiques unitaires (indices hors bornes, NaN, désappariements, dimensions nulles) + importeurs malveillants refusés à la porte avec état Failed ; **hot reload (primitives)** : version de contenu (+1 par matérialisation, insensible aux échecs), reload sous rétention, donnée précédente conservée quand le nouveau fichier est invalide |
 | `chaos_renderer` | 87 | Orchestration via backend factice (plan de frame, outcomes, pipelines, shaders, buffers, **textures** : forward du descripteur, validation dimensions/format/pixels portée par le descripteur (`validate()`) et appliquée avant le backend, **samplers** (défauts Linear+Repeat, builders), **bindings** (texture+sampler forward, binding par draw dans le plan), meshes, **uniforms** : view-projection dans le plan, Transform → matrice modèle par draw), géométrie (dont le **cube** : enroulement CCW verrouillé, couleur par face), **RenderQueue** (tri stable par pipeline), **vertex layouts déclaratifs**, **pool générationnel**, + 3 tests d'intégration : 2 d'**isolation wgpu**, 1 **validation naga des `.wgsl` intégrés** |
-| `chaos_engine` | 16 | Cycle de vie complet (init/shutdown ordonnés, exits, gating, échecs d'init, update → render) + **contrôleur de caméra debug** (avance selon forward, purge au focus perdu, rotation au drag droit seulement, pas de saut au premier mouvement, pitch clampé, vitesse bornée à la molette) |
+| `chaos_engine` | 20 | Cycle de vie complet (init/shutdown ordonnés, exits, gating, échecs d'init, update → render) + **contrôleur de caméra debug** (avance selon forward, purge au focus perdu, rotation au drag droit seulement, pas de saut au premier mouvement, pitch clampé, vitesse bornée à la molette) + **couture assets → renderer** (mapping texture/géométrie exacts, garde u16 des gros meshes, appariement UV préservé) |
 
 Les tests unitaires ne touchent jamais le GPU (la CI n'en a pas) : la validation
 GPU est locale, via les runs sandbox ci-dessous.
@@ -50,7 +51,10 @@ enregistré automatiquement en dernier).
 
 Le code de sortie doit être `0` (`echo $?` juste après).
 
-La fenêtre doit afficher la **scène pilotée par les materials** — 13 draws
+**Lancer depuis la racine du workspace** (le sol vient de fichiers réels :
+`assets/textures/checker.ppm` et `assets/models/floor.glb`, chargés par
+l'Asset Pipeline — declare → import → couture → renderer). La fenêtre doit
+afficher la **scène pilotée par les materials** — 13 draws
 par frame (triplets mesh + material + transform) pour **4 meshes** et **4
 materials** : un **sol damier violet** (quad texturé 1×1 étiré en 8×8, posé
 à y=-1 — damier 2×2 **neutre blanc/gris** répété ×4 par le sampler

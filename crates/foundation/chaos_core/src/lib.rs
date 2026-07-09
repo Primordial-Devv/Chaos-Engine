@@ -1,3 +1,4 @@
+pub mod asset;
 pub mod camera;
 pub mod color;
 pub mod error;
@@ -7,6 +8,7 @@ pub mod math;
 pub mod time;
 pub mod transform;
 
+pub use asset::AssetId;
 pub use camera::{Camera, Perspective};
 pub use color::Color;
 pub use error::{ChaosError, ChaosResult};
