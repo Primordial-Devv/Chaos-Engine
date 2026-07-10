@@ -361,6 +361,12 @@ impl Renderer {
         self.queue.clear();
     }
 
+    /// Le nombre de draws soumis pour la frame de simulation courante —
+    /// la jauge des metrics de santé.
+    pub fn draw_count(&self) -> usize {
+        self.queue.len()
+    }
+
     /// Construit le plan de la frame courante : les draws sont pris dans
     /// l'ordre de rendu de la RenderQueue, leurs materials résolus en
     /// (pipeline, binding) et leurs meshes en buffers (une ressource
@@ -407,8 +413,7 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
 
     use chaos_core::Transform;
     use chaos_core::math::Vec3;
@@ -422,15 +427,15 @@ mod tests {
     use super::*;
 
     #[derive(Clone, Default)]
-    struct Journal(Rc<RefCell<Vec<String>>>);
+    struct Journal(Arc<Mutex<Vec<String>>>);
 
     impl Journal {
         fn push(&self, entry: String) {
-            self.0.borrow_mut().push(entry);
+            self.0.lock().unwrap().push(entry);
         }
 
         fn entries(&self) -> Vec<String> {
-            self.0.borrow().clone()
+            self.0.lock().unwrap().clone()
         }
     }
 
@@ -1066,6 +1071,33 @@ mod tests {
         );
         let error = renderer.destroy_material(material).unwrap_err();
         assert!(error.to_string().contains("stale"));
+    }
+
+    #[test]
+    fn the_renderer_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<Renderer>();
+    }
+
+    #[test]
+    fn draw_count_reports_the_submitted_frame() {
+        let (mut renderer, _journal) = mock_renderer();
+        let material = plain_material(&mut renderer, "p");
+        let mesh = renderer.create_mesh("tri", &triangle()).unwrap();
+        assert_eq!(renderer.draw_count(), 0);
+        renderer.queue_draw(DrawCommand {
+            mesh,
+            material,
+            transform: Transform::IDENTITY,
+        });
+        renderer.queue_draw(DrawCommand {
+            mesh,
+            material,
+            transform: Transform::IDENTITY,
+        });
+        assert_eq!(renderer.draw_count(), 2);
+        renderer.clear_draws();
+        assert_eq!(renderer.draw_count(), 0);
     }
 
     #[test]

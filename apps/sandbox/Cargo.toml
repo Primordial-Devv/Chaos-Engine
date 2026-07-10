@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 chaos_engine.workspace = true
 env_logger.workspace = true
+log.workspace = true
 
 [lints]
 workspace = true

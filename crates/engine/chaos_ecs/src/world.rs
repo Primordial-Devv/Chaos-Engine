@@ -429,6 +429,7 @@ mod tests {
             delta: std::time::Duration::from_millis(16),
             elapsed: std::time::Duration::from_millis(32),
             frame_index: 2,
+            ..chaos_core::Time::default()
         };
         assert_eq!(world.insert_resource(time), None);
         assert_eq!(world.resource::<chaos_core::Time>(), Some(&time));

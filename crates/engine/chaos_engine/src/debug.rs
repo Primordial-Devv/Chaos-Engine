@@ -80,7 +80,7 @@ impl DebugCameraController {
             Event::Input(InputEvent::CursorLeft) => {
                 self.last_cursor = None;
             }
-            Event::Window(WindowEvent::Focused(false)) => {
+            Event::Window(WindowEvent::Focused(false)) | Event::Window(WindowEvent::Suspended) => {
                 self.held.clear();
                 self.looking = false;
                 self.last_cursor = None;
@@ -167,6 +167,16 @@ mod tests {
         let mut camera = Camera::default();
         controller.handle_event(&pressed(KeyCode::W));
         controller.handle_event(&Event::Window(WindowEvent::Focused(false)));
+        controller.update(&mut camera, 1.0);
+        assert!(nearly(camera.transform.translation, Vec3::ZERO));
+    }
+
+    #[test]
+    fn suspension_purges_held_keys_like_focus_loss() {
+        let mut controller = DebugCameraController::new();
+        let mut camera = Camera::default();
+        controller.handle_event(&pressed(KeyCode::W));
+        controller.handle_event(&Event::Window(WindowEvent::Suspended));
         controller.update(&mut camera, 1.0);
         assert!(nearly(camera.transform.translation, Vec3::ZERO));
     }

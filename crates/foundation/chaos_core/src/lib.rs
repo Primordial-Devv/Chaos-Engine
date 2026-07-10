@@ -18,5 +18,5 @@ pub use error::{ChaosError, ChaosResult};
 pub use event::{Event, InputEvent, WindowEvent};
 pub use input::{ElementState, KeyCode, MouseButton};
 pub use scene::SceneId;
-pub use time::{FrameClock, Time};
+pub use time::{FixedClock, FixedTime, FrameClock, Time};
 pub use transform::{GlobalTransform, Transform};

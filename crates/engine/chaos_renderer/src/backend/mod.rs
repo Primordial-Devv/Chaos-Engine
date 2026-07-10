@@ -16,7 +16,11 @@ mod wgpu;
 /// wgpu n'est que l'implémentation actuelle ; un backend maison (Vulkan,
 /// DirectX 12, Metal) devra seulement honorer ce trait pour remplacer wgpu
 /// sans toucher au reste du moteur.
-pub trait GraphicsBackend {
+///
+/// `Send` PAR CONTRAT : la porte du futur render thread — un backend qui
+/// ne peut pas quitter le main thread est refusé à la compilation (la
+/// politique complète : `docs/architecture/threading.md`).
+pub trait GraphicsBackend: Send {
     fn description(&self) -> String;
 
     fn resize(&mut self, width: u32, height: u32);

@@ -2,7 +2,7 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt;
 
-use chaos_core::Time;
+use chaos_core::{FixedTime, Time};
 
 /// Une ressource : des DONNÉES globales du monde qui n'appartiennent à
 /// aucune entité — temps global, paramètres moteur, configuration, état
@@ -12,6 +12,8 @@ use chaos_core::Time;
 pub trait Resource: Send + Sync + 'static {}
 
 impl Resource for Time {}
+
+impl Resource for FixedTime {}
 
 /// Le registre des ressources : au plus UNE valeur par type (clé `TypeId`).
 /// Le même mécanisme type-erased que les storages du World, sans la
@@ -105,6 +107,7 @@ mod tests {
             delta: Duration::from_millis(16),
             elapsed: Duration::from_millis(160),
             frame_index: 10,
+            ..Time::default()
         };
         assert_eq!(resources.insert(time), None);
         assert_eq!(resources.get::<Time>(), Some(&time));

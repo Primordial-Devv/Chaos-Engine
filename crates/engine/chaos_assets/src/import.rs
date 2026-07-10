@@ -130,7 +130,11 @@ impl ImportedAsset {
 /// L'extensibilité du pipeline tient à ce contrat : enregistrer de nouveaux
 /// importeurs (formats supplémentaires, kinds futurs, contenu moddé) via
 /// `AssetManager::register_importer`.
-pub trait AssetImporter {
+///
+/// `Send + Sync` PAR CONTRAT : la porte du futur chargement asynchrone —
+/// un importeur non partageable entre threads est refusé à la compilation
+/// (la politique complète : `docs/architecture/threading.md`).
+pub trait AssetImporter: Send + Sync {
     fn kind(&self) -> AssetKind;
 
     /// Extensions de fichier prises en charge, comparées en minuscules.

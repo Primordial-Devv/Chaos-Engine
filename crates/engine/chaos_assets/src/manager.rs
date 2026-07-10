@@ -6,7 +6,7 @@ use log::{debug, warn};
 
 use crate::import::{AssetImporter, ImportedAsset};
 use crate::importers::{GltfImporter, PpmImporter, WgslImporter};
-use crate::registry::{AssetKind, AssetRegistry, AssetSource};
+use crate::registry::{AssetKind, AssetRegistry, AssetSource, AssetState};
 
 /// Le gardien de la vie des assets et l'unique point d'entrée du moteur
 /// pour demander une ressource : déclarer → charger → importer → servir →
@@ -66,6 +66,35 @@ impl AssetManager {
     /// Vue en lecture du registre (consultation, listage, debug).
     pub fn registry(&self) -> &AssetRegistry {
         &self.registry
+    }
+
+    /// Les octets BRUTS actuellement en cache — la « mémoire suivie
+    /// disponible » des metrics de santé ; les tailles des données
+    /// décodées viendront quand chaque type saura se mesurer.
+    pub fn cached_bytes(&self) -> u64 {
+        self.cache.values().map(|bytes| bytes.len() as u64).sum()
+    }
+
+    /// LA FERMETURE du pipeline — l'arrêt du moteur, pas un `unload` :
+    /// caches vidés (bruts + importés), rétentions oubliées (**l'arrêt
+    /// prime sur la rétention**), toute entrée `Loaded` marquée
+    /// `Unloaded`. Les DÉCLARATIONS restent (le registre est de la
+    /// métadonnée). Idempotente par construction.
+    pub fn shutdown(&mut self) {
+        self.cache.clear();
+        self.imported.clear();
+        self.retained.clear();
+        let loaded: Vec<AssetId> = self
+            .registry
+            .iter()
+            .filter(|(_, entry)| matches!(entry.state(), AssetState::Loaded))
+            .map(|(id, _)| id)
+            .collect();
+        for id in loaded {
+            if let Err(state_error) = self.registry.mark_unloaded(id) {
+                debug!("asset {id} vanished during shutdown: {state_error}");
+            }
+        }
     }
 
     /// Charge (ou sert du cache) les octets bruts d'une ressource — le
@@ -328,6 +357,18 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
         }
+    }
+
+    #[test]
+    fn cached_bytes_track_the_raw_cache() {
+        let file = TempAsset::create("cached_bytes", b"chaos-bytes");
+        let mut manager = AssetManager::new();
+        let id = manager
+            .declare("data/blob", AssetKind::Texture, file.source())
+            .unwrap();
+        assert_eq!(manager.cached_bytes(), 0);
+        manager.load_bytes(id).unwrap();
+        assert_eq!(manager.cached_bytes(), 11);
     }
 
     #[test]
@@ -676,6 +717,50 @@ mod tests {
         let error = manager.import(id).unwrap_err();
         assert!(error.to_string().contains("expects 16 pixel bytes"));
         assert!(manager.imported(id).is_none());
+    }
+
+    #[test]
+    fn the_manager_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AssetManager>();
+    }
+
+    #[test]
+    fn shutdown_closes_everything_even_retained() {
+        let file = TempNamed::create("shutdown_all.wgsl", b"fn main() {}");
+        let mut manager = AssetManager::new();
+        let id = manager
+            .declare("shaders/closing", AssetKind::Shader, file.source())
+            .unwrap();
+        manager.acquire(id).unwrap();
+        assert_eq!(manager.registry().loaded_count(), 1);
+        assert!(manager.cached_bytes() > 0);
+        assert_eq!(manager.retain_count(id), 1);
+        manager.shutdown();
+        assert_eq!(manager.registry().loaded_count(), 0);
+        assert_eq!(manager.cached_bytes(), 0);
+        assert_eq!(manager.retain_count(id), 0);
+        assert!(manager.imported(id).is_none());
+        assert_eq!(manager.registry().len(), 1);
+        assert_eq!(
+            manager.registry().get(id).unwrap().state(),
+            &AssetState::Unloaded
+        );
+    }
+
+    #[test]
+    fn shutdown_is_idempotent() {
+        let file = TempNamed::create("shutdown_twice.wgsl", b"fn main() {}");
+        let mut manager = AssetManager::new();
+        let id = manager
+            .declare("shaders/twice", AssetKind::Shader, file.source())
+            .unwrap();
+        manager.acquire(id).unwrap();
+        manager.shutdown();
+        manager.shutdown();
+        assert_eq!(manager.registry().loaded_count(), 0);
+        assert_eq!(manager.cached_bytes(), 0);
+        assert_eq!(manager.registry().len(), 1);
     }
 
     #[test]

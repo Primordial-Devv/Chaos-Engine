@@ -4,10 +4,10 @@ use std::path::PathBuf;
 
 use chaos_engine::{
     AssetId, Camera, ChaosError, ChaosResult, Color, ColorVertex, Component, CullMode, DrawCommand,
-    EngineContext, Event, Geometry, GlobalTransform, MaterialDescriptor, MaterialHandle,
-    MeshHandle, MeshRef, PipelineDescriptor, SamplerDescriptor, SamplerFilter, Scene, SceneId,
-    Subsystem, System, TextureFormat, TexturedGeometry, TexturedVertex, Time, Transform,
-    WindowEvent, World,
+    ElementState, EngineContext, Event, Geometry, GlobalTransform, InputEvent, KeyCode,
+    MaterialDescriptor, MaterialHandle, MeshHandle, MeshRef, PipelineDescriptor, SamplerDescriptor,
+    SamplerFilter, Scene, SceneId, Subsystem, System, TextureFormat, TexturedGeometry,
+    TexturedVertex, Time, Transform, WindowEvent, World,
     assets::{AssetKind, AssetSource, ImportedAsset, texture_descriptor, textured_geometry},
     debug::DebugCameraController,
     hierarchy,
@@ -96,6 +96,10 @@ pub struct GeometryDemo {
 impl Subsystem for GeometryDemo {
     fn name(&self) -> &str {
         "geometry_demo"
+    }
+
+    fn requires_graphics(&self) -> bool {
+        true
     }
 
     fn init(&mut self, context: &mut EngineContext) -> ChaosResult<()> {
@@ -280,10 +284,58 @@ impl Subsystem for GeometryDemo {
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event, _context: &mut EngineContext) {
+    fn on_event(&mut self, event: &Event, context: &mut EngineContext) {
         self.controller.handle_event(event);
         if let Event::Window(WindowEvent::Resized { width, height }) = event {
             self.camera.set_viewport(*width, *height);
+        }
+        // P bascule la pause moteur : simulation gelée, fenêtre vivante.
+        if let Event::Input(InputEvent::Keyboard {
+            key: KeyCode::P,
+            state: ElementState::Pressed,
+            repeat: false,
+        }) = event
+        {
+            if context.paused() {
+                context.request_resume();
+            } else {
+                context.request_pause();
+            }
+        }
+        // L bascule le slow-motion (échelle de temps 1.0 ↔ 0.25) — tout le
+        // temps de JEU ralentit, caméra comprise ; le temps réel, jamais.
+        if let Event::Input(InputEvent::Keyboard {
+            key: KeyCode::L,
+            state: ElementState::Pressed,
+            repeat: false,
+        }) = event
+        {
+            let scale = if context.time_scale() < 1.0 {
+                1.0
+            } else {
+                0.25
+            };
+            context.set_time_scale(scale);
+        }
+        // O affiche le rapport de la dernière frame complète — le chemin
+        // de lecture du futur profiler, à la demande (jamais en continu).
+        if let Event::Input(InputEvent::Keyboard {
+            key: KeyCode::O,
+            state: ElementState::Pressed,
+            repeat: false,
+        }) = event
+        {
+            log::info!("{}", context.diagnostics().last_frame());
+        }
+        // H affiche la santé synthétique — le chemin de lecture du futur
+        // overlay debug et des diagnostics de production.
+        if let Event::Input(InputEvent::Keyboard {
+            key: KeyCode::H,
+            state: ElementState::Pressed,
+            repeat: false,
+        }) = event
+        {
+            log::info!("{}", context.metrics().snapshot());
         }
     }
 
