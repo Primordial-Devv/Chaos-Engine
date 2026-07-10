@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use chaos_core::{ChaosError, ChaosResult, Event, FrameClock, WindowEvent};
 use chaos_renderer::{Renderer, RendererConfig};
+use chaos_scene::TransformPropagation;
 use chaos_window::{WindowEventHandler, WindowHandle, run_event_loop};
 use log::{debug, error, info, trace};
 
@@ -17,6 +18,10 @@ pub mod stages {
     /// La phase d'update : les systèmes ECS tournent à chaque frame,
     /// avant les updates des subsystems.
     pub const UPDATE: &str = "update";
+
+    /// La phase post-update : les calculs dérivés des mutations d'UPDATE —
+    /// la propagation des transforms y vit ; les subsystems lisent frais.
+    pub const POST_UPDATE: &str = "post_update";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +92,7 @@ impl Engine {
     }
 
     fn start(&mut self) {
-        if let Err(schedule_error) = self.context.schedule_mut().add_stage(stages::UPDATE) {
+        if let Err(schedule_error) = self.setup_schedule() {
             error!("engine schedule setup failed: {schedule_error}");
             self.init_error = Some(schedule_error);
             self.context.request_exit();
@@ -107,6 +112,16 @@ impl Engine {
         self.clock = FrameClock::new();
         self.state = EngineState::Running;
         info!("engine running ({} subsystem(s))", self.subsystems.len());
+    }
+
+    /// Les phases moteur et les systèmes-services : UPDATE (les systèmes
+    /// de jeu), POST_UPDATE (les calculs dérivés — la propagation des
+    /// transforms, garantie par le moteur).
+    fn setup_schedule(&mut self) -> ChaosResult<()> {
+        let schedule = self.context.schedule_mut();
+        schedule.add_stage(stages::UPDATE)?;
+        schedule.add_stage(stages::POST_UPDATE)?;
+        schedule.add_system(stages::POST_UPDATE, TransformPropagation)
     }
 }
 
@@ -222,6 +237,9 @@ impl WindowEventHandler for Engine {
             debug!("shutdown subsystem '{}'", subsystem.name());
             subsystem.shutdown(&mut self.context);
         }
+        if let Err(scene_error) = self.context.shutdown_scenes() {
+            error!("scene cleanup failed during shutdown: {scene_error}");
+        }
         self.initialized = 0;
         self.window = None;
         self.state = EngineState::Stopped;
@@ -232,6 +250,7 @@ impl WindowEventHandler for Engine {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::fs;
     use std::rc::Rc;
 
     use chaos_core::{ElementState, InputEvent, KeyCode, Time};
@@ -545,5 +564,150 @@ mod tests {
         assert!(!engine.exit_requested());
         engine.on_update();
         assert!(engine.exit_requested());
+    }
+
+    #[test]
+    fn the_engine_shutdown_cleans_the_scenes() {
+        let mut engine = Engine::new(unpaced_config());
+        engine.start();
+        let (world, scenes) = engine.context.world_and_scenes();
+        let id = scenes.create("maps/spawn").unwrap();
+        scenes
+            .load(world, id, |scene, world| {
+                scene.spawn(world)?;
+                scene.spawn(world)?;
+                Ok(())
+            })
+            .unwrap();
+        scenes.activate(id).unwrap();
+        assert_eq!(engine.context.world().len(), 2);
+        engine.on_shutdown();
+        assert!(engine.context.world().is_empty());
+        assert!(engine.context.scenes().is_empty());
+        assert_eq!(engine.context.scenes().main(), None);
+    }
+
+    #[test]
+    fn the_engine_loads_a_real_scene_file_end_to_end() {
+        use chaos_assets::{AssetKind, AssetSource};
+        use chaos_core::math::Vec3;
+        use chaos_core::{GlobalTransform, Transform};
+        use chaos_scene::{EntityData, FORMAT_VERSION, SceneData};
+
+        let path = std::env::temp_dir().join(format!(
+            "chaos_engine_scene_e2e_{}.cscn",
+            std::process::id()
+        ));
+        let data = SceneData {
+            version: FORMAT_VERSION,
+            name: String::from("scenes/e2e"),
+            entities: vec![
+                EntityData {
+                    transform: Some(Transform::from_translation(Vec3::new(2.0, 0.0, 0.0))),
+                    mesh: None,
+                    parent: None,
+                },
+                EntityData {
+                    transform: Some(Transform::from_translation(Vec3::new(1.0, 0.0, 0.0))),
+                    mesh: None,
+                    parent: Some(0),
+                },
+            ],
+        };
+        crate::scenes::save_scene(&path, &data).unwrap();
+
+        let mut engine = Engine::new(unpaced_config());
+        engine.start();
+        let asset = engine
+            .context
+            .assets_mut()
+            .declare(
+                "scenes/e2e",
+                AssetKind::Scene,
+                AssetSource::File(path.clone()),
+            )
+            .unwrap();
+        let loaded = crate::scenes::load_scene(engine.context.assets_mut(), asset).unwrap();
+        let (world, scenes) = engine.context.world_and_scenes();
+        let id = scenes.create(&loaded.name).unwrap();
+        scenes
+            .load(world, id, |scene, world| loaded.apply(scene, world))
+            .unwrap();
+        scenes.activate(id).unwrap();
+        engine.on_update();
+
+        let world = engine.context.world();
+        let scene = engine.context.scenes().scene(id).unwrap();
+        assert_eq!(scene.members(world).count(), 2);
+        let child = scene
+            .members(world)
+            .find(|entity| {
+                world
+                    .get::<GlobalTransform>(*entity)
+                    .is_some_and(|global| (global.translation().x - 3.0).abs() < 1e-5)
+            })
+            .expect("l'enfant composé doit porter un global frais");
+        assert!(world.is_alive(child));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_failed_scene_load_leaves_the_engine_coherent() {
+        use chaos_assets::{AssetKind, AssetSource};
+
+        let path = std::env::temp_dir().join(format!(
+            "chaos_engine_scene_corrupt_{}.cscn",
+            std::process::id()
+        ));
+        fs::write(&path, b"definitely not a scene").unwrap();
+
+        let mut engine = Engine::new(unpaced_config());
+        engine.start();
+        let asset = engine
+            .context
+            .assets_mut()
+            .declare(
+                "scenes/corrupt",
+                AssetKind::Scene,
+                AssetSource::File(path.clone()),
+            )
+            .unwrap();
+        let error = crate::scenes::load_scene(engine.context.assets_mut(), asset).unwrap_err();
+        assert!(error.to_string().contains("malformed scene file"));
+        assert!(engine.context.world().is_empty());
+        assert!(engine.context.scenes().is_empty());
+        engine.on_update();
+        assert!(!engine.exit_requested());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_engine_propagates_transforms_each_update() {
+        use chaos_core::math::Vec3;
+        use chaos_core::{GlobalTransform, Transform};
+        use chaos_scene::hierarchy;
+
+        let mut engine = Engine::new(unpaced_config());
+        engine.start();
+        let world = engine.context.world_mut();
+        let parent = world.spawn().unwrap();
+        let child = world.spawn().unwrap();
+        world
+            .insert(
+                parent,
+                Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        world
+            .insert(child, Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)))
+            .unwrap();
+        hierarchy::attach(world, child, parent).unwrap();
+        engine.on_update();
+        let global = engine
+            .context
+            .world()
+            .get::<GlobalTransform>(child)
+            .unwrap();
+        assert_eq!(global.translation(), Vec3::new(3.0, 0.0, 0.0));
     }
 }

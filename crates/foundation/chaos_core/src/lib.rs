@@ -6,6 +6,7 @@ pub mod error;
 pub mod event;
 pub mod input;
 pub mod math;
+pub mod scene;
 pub mod time;
 pub mod transform;
 
@@ -16,5 +17,6 @@ pub use entity::Entity;
 pub use error::{ChaosError, ChaosResult};
 pub use event::{Event, InputEvent, WindowEvent};
 pub use input::{ElementState, KeyCode, MouseButton};
+pub use scene::SceneId;
 pub use time::{FrameClock, Time};
-pub use transform::Transform;
+pub use transform::{GlobalTransform, Transform};

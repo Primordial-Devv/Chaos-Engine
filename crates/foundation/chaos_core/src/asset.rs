@@ -14,17 +14,37 @@ pub struct AssetId(u64);
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
+/// FNV-1a 64 bits, octet-exact — le hachage d'identité partagé par toutes
+/// les identités nommées du moteur (AssetId, SceneId). VERROUILLÉ par
+/// vecteurs de référence dans les tests de chaque identité : le changer
+/// invaliderait toute référence sérialisée.
+pub(crate) fn fnv1a_64(name: &str) -> u64 {
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in name.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
 impl AssetId {
     /// Dérive l'identité du nom logique — FNV-1a 64 bits, octet-exact,
     /// VERROUILLÉ par vecteurs de référence en test : changer cet
     /// algorithme invaliderait toute référence d'asset sérialisée.
     pub fn from_name(name: &str) -> Self {
-        let mut hash = FNV_OFFSET_BASIS;
-        for byte in name.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        Self(hash)
+        Self(fnv1a_64(name))
+    }
+
+    /// Reconstruit une identité depuis sa valeur brute — les systèmes du
+    /// moteur (sérialisation, réseau) en ont besoin, et une identité
+    /// forgée est inoffensive : le registre la rejette simplement.
+    pub fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// La valeur brute — pour la sérialisation et le réseau.
+    pub fn value(&self) -> u64 {
+        self.0
     }
 }
 
@@ -90,5 +110,20 @@ mod tests {
     #[test]
     fn display_is_stable_hex() {
         assert_eq!(AssetId::from_name("").to_string(), "asset:cbf29ce484222325");
+    }
+
+    #[test]
+    fn raw_value_roundtrips() {
+        let id = AssetId::from_name("textures/brick");
+        assert_eq!(AssetId::from_raw(id.value()), id);
+    }
+
+    #[test]
+    fn raw_construction_matches_the_reference_vectors() {
+        assert_eq!(
+            AssetId::from_raw(0xcbf2_9ce4_8422_2325),
+            AssetId::from_name("")
+        );
+        assert_eq!(AssetId::from_name("a").value(), 0xaf63_dc4c_8601_ec8c);
     }
 }

@@ -26,7 +26,8 @@ Engine::run()
   └─ run_event_loop()                        boucle OS démarrée
        ├─ on_window_ready(WindowHandle)      fenêtre native créée
        │    ├─ enregistrement du RenderSubsystem (en dernier)
-       │    ├─ déclaration du stage ECS `stages::UPDATE`
+       │    ├─ déclaration des stages ECS `stages::{UPDATE, POST_UPDATE}`
+       │    │    └─ + le service moteur TransformPropagation (POST_UPDATE)
        │    └─ init des subsystems           dans l'ordre d'enregistrement
        │         └─ (ils y enregistrent leurs systèmes ECS)
        ├─ on_event(Event)                    système + entrées, traduits
@@ -36,6 +37,8 @@ Engine::run()
        │    ├─ gating : rien avant l'échéance de frame (target_fps)
        │    ├─ FrameClock::tick()            delta borné (max 250 ms)
        │    ├─ tick ECS : ressource Time rafraîchie + Schedule sur le World
+       │    │             (UPDATE : systèmes de jeu ; POST_UPDATE : dérivés
+       │    │              — propagation des transforms)
        │    │             (échec → error + request_exit : un monde en état
        │    │              inconnu ne continue pas)
        │    ├─ clear_draws()                 la RenderQueue repart vide
@@ -47,7 +50,9 @@ Engine::run()
        ├─ frame_deadline()                   → ControlFlow::WaitUntil(échéance)
        ├─ on_redraw()                        sur RedrawRequested :
        │    └─ render de chaque subsystem    phase présentation
-       └─ on_shutdown()                      subsystems arrêtés en ordre INVERSE
+       └─ on_shutdown()                      subsystems arrêtés en ordre INVERSE,
+                                             puis nettoyage des scènes
+                                             (SceneManager::shutdown, déterministe)
 ```
 
 La séparation update/render suit le modèle winit : la simulation vit dans

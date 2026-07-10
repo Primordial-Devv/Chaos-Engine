@@ -1,15 +1,18 @@
-use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::collections::HashMap;
+use std::f32::consts::FRAC_PI_4;
 use std::path::PathBuf;
 
 use chaos_engine::{
-    Camera, ChaosError, ChaosResult, Color, ColorVertex, Component, CullMode, DrawCommand,
-    EngineContext, Entity, Event, Geometry, MaterialDescriptor, MaterialHandle, MeshHandle,
-    PipelineDescriptor, SamplerDescriptor, SamplerFilter, Subsystem, System, TextureFormat,
-    TexturedGeometry, TexturedVertex, Time, Transform, WindowEvent, World,
+    AssetId, Camera, ChaosError, ChaosResult, Color, ColorVertex, Component, CullMode, DrawCommand,
+    EngineContext, Event, Geometry, GlobalTransform, MaterialDescriptor, MaterialHandle,
+    MeshHandle, MeshRef, PipelineDescriptor, SamplerDescriptor, SamplerFilter, Scene, SceneId,
+    Subsystem, System, TextureFormat, TexturedGeometry, TexturedVertex, Time, Transform,
+    WindowEvent, World,
     assets::{AssetKind, AssetSource, ImportedAsset, texture_descriptor, textured_geometry},
     debug::DebugCameraController,
+    hierarchy,
     math::{Quat, Vec3},
-    shaders, stages,
+    scenes, shaders, stages,
 };
 
 const RING_COUNT: u8 = 8;
@@ -59,11 +62,18 @@ const TRIANGLES: [(Vec3, f32); 3] = [
 /// renderer par `chaos_engine::assets`) ; le reste est procédural. 4 meshes
 /// partagés, 4 pipelines, 4 materials — dont deux (`demo.floor` violet,
 /// `demo.cube` ambre) partageant le MÊME damier : la couleur vient du
-/// `base_color` du material. 13 draws par frame. **Le cube central est une
-/// entité ECS** : son orientation vit dans un composant `Transform`, sa
-/// vitesse dans un composant `Spin`, et c'est le système `demo.spin`
-/// (enregistré dans `stages::UPDATE`) qui l'anime depuis la ressource
-/// `Time` — l'update ne fait que lire le monde pour bâtir le DrawCommand.
+/// `base_color` du material. 15 draws par frame. **Le sol, le cube central
+/// et ses deux satellites sont du CONTENU : la scène `scenes/demo` est
+/// chargée depuis le fichier committé `assets/scenes/demo.cscn` via
+/// l'Asset Pipeline — aucune entité n'est construite dans ce code.** Les
+/// entités portent des `MeshRef` (identités d'assets stables — le mesh
+/// procédural du cube a la sienne via `AssetSource::Procedural`) résolus
+/// au chargement puis par la table AssetId → handles du renderer. Le cube
+/// tourne via son composant `Spin` (ré-attaché après chargement : le
+/// comportement n'est pas des données de scène) animé par `demo.spin`
+/// (`stages::UPDATE`), les satellites suivent par la seule propagation
+/// (`stages::POST_UPDATE`), et l'update dessine les membres depuis leurs
+/// `GlobalTransform`.
 /// Lancer depuis la racine du workspace (chemins d'assets relatifs).
 /// N'utilise que le vocabulaire haut niveau — l'API d'un futur gamemode.
 #[derive(Default)]
@@ -76,7 +86,8 @@ pub struct GeometryDemo {
     floor: Option<MeshHandle>,
     colored_cube: Option<MeshHandle>,
     textured_cube: Option<MeshHandle>,
-    cube_entity: Option<Entity>,
+    scene_id: Option<SceneId>,
+    mesh_table: HashMap<AssetId, (MeshHandle, MaterialHandle)>,
     elapsed: f32,
     camera: Camera,
     controller: DebugCameraController,
@@ -200,30 +211,72 @@ impl Subsystem for GeometryDemo {
         );
 
         self.triangle = Some(renderer.create_mesh("demo.triangle", &triangle)?);
-        self.floor = Some(renderer.create_textured_mesh("demo.floor", &floor_quad)?);
+        let floor_mesh = renderer.create_textured_mesh("demo.floor", &floor_quad)?;
+        self.floor = Some(floor_mesh);
         self.colored_cube = Some(renderer.create_mesh("demo.cube", &cube)?);
-        self.textured_cube =
-            Some(renderer.create_textured_mesh("demo.textured_cube", &textured_cube)?);
+        let textured_cube_mesh =
+            renderer.create_textured_mesh("demo.textured_cube", &textured_cube)?;
+        self.textured_cube = Some(textured_cube_mesh);
 
         self.camera.transform.translation = Vec3::new(0.0, 1.2, 6.0);
         let (width, height) = renderer.surface_size();
         self.camera.set_viewport(width, height);
 
-        let cube_entity = context.world_mut().spawn()?;
-        context
-            .world_mut()
-            .insert(cube_entity, Transform::IDENTITY)?;
-        context.world_mut().insert(
-            cube_entity,
-            Spin {
-                yaw_rate: 0.9,
-                pitch_rate: 0.6,
-            },
-        )?;
         context
             .schedule_mut()
             .add_system(stages::UPDATE, SpinSystem)?;
-        self.cube_entity = Some(cube_entity);
+
+        // Le mesh procédural du cube reçoit une identité stable : l'Asset
+        // Pipeline est l'espace de noms de résolution, même pour le
+        // contenu généré. La table résout AssetId → handles du renderer.
+        let cube_asset =
+            context
+                .assets_mut()
+                .declare("demo/cube", AssetKind::Mesh, AssetSource::Procedural)?;
+        let floor_material_handle = self.floor_material.ok_or_else(|| {
+            ChaosError::Scene(String::from("floor material missing during scene setup"))
+        })?;
+        let cube_material_handle = self.cube_material.ok_or_else(|| {
+            ChaosError::Scene(String::from("cube material missing during scene setup"))
+        })?;
+        self.mesh_table
+            .insert(floor_id, (floor_mesh, floor_material_handle));
+        self.mesh_table
+            .insert(cube_asset, (textured_cube_mesh, cube_material_handle));
+
+        // La scène de démo est du CONTENU : chargée depuis le fichier
+        // committé `assets/scenes/demo.cscn` via l'Asset Pipeline —
+        // aucune entité n'est construite dans ce code. Les références
+        // (`models/floor`, `demo/cube`) sont résolues au chargement.
+        let scene_asset = context.assets_mut().declare(
+            "scenes/demo",
+            AssetKind::Scene,
+            AssetSource::File(PathBuf::from("assets/scenes/demo.cscn")),
+        )?;
+        let loaded = scenes::load_scene(context.assets_mut(), scene_asset)?;
+
+        let (world, scene_manager) = context.world_and_scenes();
+        let scene_id = scene_manager.create(&loaded.name)?;
+        scene_manager.load(world, scene_id, |scene, world| loaded.apply(scene, world))?;
+        scene_manager.activate(scene_id)?;
+        // Le comportement n'est pas des données de scène (le futur
+        // scripting) : le contenu ré-attache son Spin au parent rechargé.
+        let Some(scene) = scene_manager.scene(scene_id) else {
+            return Err(ChaosError::Scene(String::from("demo scene not registered")));
+        };
+        let spinner = scene
+            .members(world)
+            .find(|entity| hierarchy::children_of(world, *entity).next().is_some());
+        if let Some(spinner) = spinner {
+            world.insert(
+                spinner,
+                Spin {
+                    yaw_rate: 0.9,
+                    pitch_rate: 0.6,
+                },
+            )?;
+        }
+        self.scene_id = Some(scene_id);
         Ok(())
     }
 
@@ -235,57 +288,58 @@ impl Subsystem for GeometryDemo {
     }
 
     fn update(&mut self, context: &mut EngineContext) {
-        let (
-            Some(solid),
-            Some(flat),
-            Some(floor_material),
-            Some(cube_material),
-            Some(triangle),
-            Some(floor),
-            Some(colored_cube),
-            Some(textured_cube),
-        ) = (
+        let (Some(solid), Some(flat), Some(triangle), Some(colored_cube)) = (
             self.solid_material,
             self.flat_material,
-            self.floor_material,
-            self.cube_material,
             self.triangle,
-            self.floor,
             self.colored_cube,
-            self.textured_cube,
-        )
-        else {
+        ) else {
             return;
         };
         let delta_seconds = context.time().delta_seconds();
         self.controller.update(&mut self.camera, delta_seconds);
         self.elapsed += delta_seconds;
         let t = self.elapsed;
-        let cube_transform = self
-            .cube_entity
-            .and_then(|entity| context.world().get::<Transform>(entity))
-            .copied()
-            .unwrap_or(Transform::IDENTITY);
+        // La scène active se dessine par ses données : membres → MeshRef →
+        // table de résolution → DrawCommand (GlobalTransform décomposé).
+        let scene_draws: Vec<(Transform, MeshHandle, MaterialHandle)> = self
+            .scene_id
+            .and_then(|id| context.scenes().scene(id))
+            .map(|scene: &Scene| {
+                let world = context.world();
+                scene
+                    .members(world)
+                    .filter_map(|entity| {
+                        let mesh_ref = world.get::<MeshRef>(entity)?;
+                        let (mesh, material) = self.mesh_table.get(&mesh_ref.mesh()).copied()?;
+                        let global = world.get::<GlobalTransform>(entity)?;
+                        let (scale, rotation, translation) =
+                            global.matrix().to_scale_rotation_translation();
+                        Some((
+                            Transform {
+                                translation,
+                                rotation,
+                                scale,
+                            },
+                            mesh,
+                            material,
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let Some(renderer) = context.renderer_mut() else {
             return;
         };
         renderer.set_view_projection(self.camera.view_projection());
 
-        renderer.queue_draw(DrawCommand {
-            mesh: floor,
-            material: floor_material,
-            transform: Transform {
-                translation: Vec3::new(0.0, -1.0, 0.0),
-                rotation: Quat::from_rotation_x(-FRAC_PI_2),
-                scale: Vec3::new(8.0, 8.0, 1.0),
-            },
-        });
-
-        renderer.queue_draw(DrawCommand {
-            mesh: textured_cube,
-            material: cube_material,
-            transform: cube_transform,
-        });
+        for (transform, mesh, material) in &scene_draws {
+            renderer.queue_draw(DrawCommand {
+                mesh: *mesh,
+                material: *material,
+                transform: *transform,
+            });
+        }
 
         for index in 0..RING_COUNT {
             let i = f32::from(index);

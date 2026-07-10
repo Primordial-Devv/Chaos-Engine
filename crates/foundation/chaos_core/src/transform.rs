@@ -3,8 +3,10 @@ use crate::math::{Mat4, Quat, Vec3, world};
 /// Transformation spatiale d'un objet : position, rotation, échelle.
 ///
 /// Concept fondamental du moteur, réutilisé par l'ECS, les scènes,
-/// l'éditeur, la physique et l'animation. Transformation locale uniquement :
-/// la hiérarchie parent/enfant appartiendra au Scene System.
+/// l'éditeur, la physique et l'animation. **Transformation LOCALE** :
+/// relative au parent dans une hiérarchie de scène, relative au monde pour
+/// une racine (une entité sans parent). Le résultat monde calculé vit dans
+/// [`GlobalTransform`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
     pub translation: Vec3,
@@ -82,6 +84,38 @@ impl Default for Transform {
     }
 }
 
+/// Transform GLOBAL calculé — la matrice monde d'une entité, sortie de la
+/// propagation de hiérarchie (Scene System). Une MATRICE et non un TRS :
+/// la composition TRS est perdante (échelle non uniforme du parent +
+/// rotation de l'enfant = cisaillement irreprésentable) — la matrice
+/// affine est toujours correcte, et c'est la matrice modèle que le
+/// renderer consomme. Calculé, jamais édité à la main : le local se pilote
+/// via [`Transform`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlobalTransform(Mat4);
+
+impl GlobalTransform {
+    pub const IDENTITY: Self = Self(Mat4::IDENTITY);
+
+    pub fn from_matrix(matrix: Mat4) -> Self {
+        Self(matrix)
+    }
+
+    /// Le global d'une racine : son local, tel quel.
+    pub fn from_transform(transform: &Transform) -> Self {
+        Self(transform.matrix())
+    }
+
+    pub fn matrix(&self) -> Mat4 {
+        self.0
+    }
+
+    /// La position monde — la colonne de translation de la matrice.
+    pub fn translation(&self) -> Vec3 {
+        self.0.w_axis.truncate()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::f32::consts::FRAC_PI_2;
@@ -134,5 +168,19 @@ mod tests {
         let transform = Transform::from_scale(Vec3::new(2.0, 3.0, 4.0));
         let point = transform.matrix().transform_point3(Vec3::ONE);
         assert!(nearly(point, Vec3::new(2.0, 3.0, 4.0)));
+    }
+
+    #[test]
+    fn global_identity_is_the_identity_matrix() {
+        assert_eq!(GlobalTransform::IDENTITY.matrix(), Mat4::IDENTITY);
+        assert_eq!(GlobalTransform::IDENTITY.translation(), Vec3::ZERO);
+    }
+
+    #[test]
+    fn a_roots_global_is_its_local_matrix() {
+        let transform = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        let global = GlobalTransform::from_transform(&transform);
+        assert_eq!(global.matrix(), transform.matrix());
+        assert!(nearly(global.translation(), Vec3::new(1.0, 2.0, 3.0)));
     }
 }
