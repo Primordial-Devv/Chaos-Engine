@@ -10,6 +10,15 @@ use crate::context::EngineContext;
 use crate::render_subsystem::RenderSubsystem;
 use crate::subsystem::Subsystem;
 
+/// Les phases moteur du Schedule ECS : la POLITIQUE des noms vit ici, le
+/// mécanisme dans chaos_ecs. Une seule phase réelle aujourd'hui — les
+/// suivantes arriveront avec leurs besoins.
+pub mod stages {
+    /// La phase d'update : les systèmes ECS tournent à chaque frame,
+    /// avant les updates des subsystems.
+    pub const UPDATE: &str = "update";
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EngineState {
     Created,
@@ -78,6 +87,12 @@ impl Engine {
     }
 
     fn start(&mut self) {
+        if let Err(schedule_error) = self.context.schedule_mut().add_stage(stages::UPDATE) {
+            error!("engine schedule setup failed: {schedule_error}");
+            self.init_error = Some(schedule_error);
+            self.context.request_exit();
+            return;
+        }
         for index in 0..self.subsystems.len() {
             let name = self.subsystems[index].name().to_owned();
             debug!("init subsystem '{name}'");
@@ -133,6 +148,7 @@ impl WindowEventHandler for Engine {
             info!("close requested by the system");
             self.context.request_exit();
         }
+        self.context.world_mut().send_message(event);
         for subsystem in &mut self.subsystems[..self.initialized] {
             subsystem.on_event(&event, &mut self.context);
         }
@@ -150,12 +166,17 @@ impl WindowEventHandler for Engine {
         }
         let time = self.clock.tick();
         self.context.set_time(time);
+        if let Err(schedule_error) = self.context.tick_world(time) {
+            error!("ecs schedule failed: {schedule_error}");
+            self.context.request_exit();
+        }
         if let Some(renderer) = self.context.renderer_mut() {
             renderer.clear_draws();
         }
         for subsystem in &mut self.subsystems[..self.initialized] {
             subsystem.update(&mut self.context);
         }
+        self.context.world_mut().clear_messages();
         if let Some(limit) = self.config.frame_limit
             && time.frame_index >= limit
         {
@@ -213,7 +234,8 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use chaos_core::{ElementState, InputEvent, KeyCode};
+    use chaos_core::{ElementState, InputEvent, KeyCode, Time};
+    use chaos_ecs::{Resource, System, World};
 
     use super::*;
 
@@ -292,6 +314,74 @@ mod tests {
         EngineConfig {
             target_fps: None,
             ..EngineConfig::default()
+        }
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Ticks(u32);
+
+    impl Resource for Ticks {}
+
+    struct CountUp;
+
+    impl System for CountUp {
+        fn name(&self) -> &str {
+            "count_up"
+        }
+
+        fn run(&self, world: &mut World) -> ChaosResult<()> {
+            if let Some(ticks) = world.resource_mut::<Ticks>() {
+                ticks.0 += 1;
+            }
+            Ok(())
+        }
+    }
+
+    struct FailingSystem;
+
+    impl System for FailingSystem {
+        fn name(&self) -> &str {
+            "explode"
+        }
+
+        fn run(&self, _world: &mut World) -> ChaosResult<()> {
+            Err(ChaosError::Ecs(String::from("boom")))
+        }
+    }
+
+    struct Installer {
+        failing: bool,
+    }
+
+    impl Subsystem for Installer {
+        fn name(&self) -> &str {
+            "installer"
+        }
+
+        fn init(&mut self, context: &mut EngineContext) -> ChaosResult<()> {
+            context.world_mut().insert_resource(Ticks(0));
+            if self.failing {
+                context
+                    .schedule_mut()
+                    .add_system(stages::UPDATE, FailingSystem)
+            } else {
+                context.schedule_mut().add_system(stages::UPDATE, CountUp)
+            }
+        }
+    }
+
+    struct MessageProbe {
+        journal: Journal,
+    }
+
+    impl Subsystem for MessageProbe {
+        fn name(&self) -> &str {
+            "message_probe"
+        }
+
+        fn update(&mut self, context: &mut EngineContext) {
+            let seen = context.world().messages::<Event>().count();
+            self.journal.push(format!("messages {seen}"));
         }
     }
 
@@ -406,5 +496,54 @@ mod tests {
         engine.add_subsystem(Probe::boxed("a", &journal));
         engine.on_update();
         assert!(journal.entries().is_empty());
+    }
+
+    #[test]
+    fn the_world_receives_time_as_a_resource() {
+        let mut engine = Engine::new(unpaced_config());
+        engine.start();
+        engine.on_update();
+        let time = engine.context.time();
+        assert_eq!(time.frame_index, 1);
+        assert_eq!(engine.context.world().resource::<Time>(), Some(&time));
+    }
+
+    #[test]
+    fn a_pumped_event_is_a_message_for_exactly_one_update() {
+        let journal = Journal::default();
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Box::new(MessageProbe {
+            journal: journal.clone(),
+        }));
+        engine.start();
+        engine.on_event(Event::Input(InputEvent::Keyboard {
+            key: KeyCode::Escape,
+            state: ElementState::Pressed,
+            repeat: false,
+        }));
+        engine.on_update();
+        engine.on_update();
+        assert_eq!(journal.entries(), vec!["messages 1", "messages 0"]);
+    }
+
+    #[test]
+    fn a_registered_system_runs_every_update() {
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Box::new(Installer { failing: false }));
+        engine.start();
+        engine.on_update();
+        engine.on_update();
+        engine.on_update();
+        assert_eq!(engine.context.world().resource::<Ticks>(), Some(&Ticks(3)));
+    }
+
+    #[test]
+    fn a_failing_system_stops_the_engine_cleanly() {
+        let mut engine = Engine::new(unpaced_config());
+        engine.add_subsystem(Box::new(Installer { failing: true }));
+        engine.start();
+        assert!(!engine.exit_requested());
+        engine.on_update();
+        assert!(engine.exit_requested());
     }
 }

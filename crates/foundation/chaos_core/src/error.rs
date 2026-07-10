@@ -8,6 +8,7 @@ pub enum ChaosError {
     Engine(String),
     Graphics(String),
     Asset(String),
+    Ecs(String),
 }
 
 pub type ChaosResult<T> = Result<T, ChaosError>;
@@ -19,6 +20,7 @@ impl fmt::Display for ChaosError {
             Self::Engine(message) => write!(f, "engine error: {message}"),
             Self::Graphics(message) => write!(f, "graphics error: {message}"),
             Self::Asset(message) => write!(f, "asset error: {message}"),
+            Self::Ecs(message) => write!(f, "ecs error: {message}"),
         }
     }
 }

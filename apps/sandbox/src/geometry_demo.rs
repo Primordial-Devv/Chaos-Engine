@@ -2,18 +2,50 @@ use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 use std::path::PathBuf;
 
 use chaos_engine::{
-    Camera, ChaosError, ChaosResult, Color, ColorVertex, CullMode, DrawCommand, EngineContext,
-    Event, Geometry, MaterialDescriptor, MaterialHandle, MeshHandle, PipelineDescriptor,
-    SamplerDescriptor, SamplerFilter, Subsystem, TextureFormat, TexturedGeometry, TexturedVertex,
-    Transform, WindowEvent,
+    Camera, ChaosError, ChaosResult, Color, ColorVertex, Component, CullMode, DrawCommand,
+    EngineContext, Entity, Event, Geometry, MaterialDescriptor, MaterialHandle, MeshHandle,
+    PipelineDescriptor, SamplerDescriptor, SamplerFilter, Subsystem, System, TextureFormat,
+    TexturedGeometry, TexturedVertex, Time, Transform, WindowEvent, World,
     assets::{AssetKind, AssetSource, ImportedAsset, texture_descriptor, textured_geometry},
     debug::DebugCameraController,
     math::{Quat, Vec3},
-    shaders,
+    shaders, stages,
 };
 
 const RING_COUNT: u8 = 8;
 const RING_RADIUS: f32 = 2.2;
+
+/// La rotation du cube central, en DONNÉES — le contenu définit ses
+/// composants, le moteur fournit le mécanisme.
+struct Spin {
+    yaw_rate: f32,
+    pitch_rate: f32,
+}
+
+impl Component for Spin {}
+
+/// Le système du spin : lit le temps du monde, oriente tout porteur de
+/// `Spin`. Il vit dans l'app, pas dans le moteur — l'API d'un futur
+/// gamemode.
+struct SpinSystem;
+
+impl System for SpinSystem {
+    fn name(&self) -> &str {
+        "demo.spin"
+    }
+
+    fn run(&self, world: &mut World) -> ChaosResult<()> {
+        let elapsed = world
+            .resource::<Time>()
+            .map(|time| time.elapsed.as_secs_f32())
+            .unwrap_or_default();
+        for (_, transform, spin) in world.query2_mut::<Transform, Spin>()? {
+            transform.rotation = Quat::from_rotation_y(spin.yaw_rate * elapsed)
+                * Quat::from_rotation_x(spin.pitch_rate * elapsed);
+        }
+        Ok(())
+    }
+}
 const TRIANGLES: [(Vec3, f32); 3] = [
     (Vec3::new(-2.6, 0.9, -1.2), 0.7),
     (Vec3::new(2.6, 1.4, -2.0), 1.0),
@@ -27,9 +59,13 @@ const TRIANGLES: [(Vec3, f32); 3] = [
 /// renderer par `chaos_engine::assets`) ; le reste est procédural. 4 meshes
 /// partagés, 4 pipelines, 4 materials — dont deux (`demo.floor` violet,
 /// `demo.cube` ambre) partageant le MÊME damier : la couleur vient du
-/// `base_color` du material. 13 draws par frame. Lancer depuis la racine du
-/// workspace (chemins d'assets relatifs). N'utilise que le vocabulaire haut
-/// niveau — l'API d'un futur gamemode.
+/// `base_color` du material. 13 draws par frame. **Le cube central est une
+/// entité ECS** : son orientation vit dans un composant `Transform`, sa
+/// vitesse dans un composant `Spin`, et c'est le système `demo.spin`
+/// (enregistré dans `stages::UPDATE`) qui l'anime depuis la ressource
+/// `Time` — l'update ne fait que lire le monde pour bâtir le DrawCommand.
+/// Lancer depuis la racine du workspace (chemins d'assets relatifs).
+/// N'utilise que le vocabulaire haut niveau — l'API d'un futur gamemode.
 #[derive(Default)]
 pub struct GeometryDemo {
     solid_material: Option<MaterialHandle>,
@@ -40,6 +76,7 @@ pub struct GeometryDemo {
     floor: Option<MeshHandle>,
     colored_cube: Option<MeshHandle>,
     textured_cube: Option<MeshHandle>,
+    cube_entity: Option<Entity>,
     elapsed: f32,
     camera: Camera,
     controller: DebugCameraController,
@@ -171,6 +208,22 @@ impl Subsystem for GeometryDemo {
         self.camera.transform.translation = Vec3::new(0.0, 1.2, 6.0);
         let (width, height) = renderer.surface_size();
         self.camera.set_viewport(width, height);
+
+        let cube_entity = context.world_mut().spawn()?;
+        context
+            .world_mut()
+            .insert(cube_entity, Transform::IDENTITY)?;
+        context.world_mut().insert(
+            cube_entity,
+            Spin {
+                yaw_rate: 0.9,
+                pitch_rate: 0.6,
+            },
+        )?;
+        context
+            .schedule_mut()
+            .add_system(stages::UPDATE, SpinSystem)?;
+        self.cube_entity = Some(cube_entity);
         Ok(())
     }
 
@@ -208,6 +261,11 @@ impl Subsystem for GeometryDemo {
         self.controller.update(&mut self.camera, delta_seconds);
         self.elapsed += delta_seconds;
         let t = self.elapsed;
+        let cube_transform = self
+            .cube_entity
+            .and_then(|entity| context.world().get::<Transform>(entity))
+            .copied()
+            .unwrap_or(Transform::IDENTITY);
         let Some(renderer) = context.renderer_mut() else {
             return;
         };
@@ -226,9 +284,7 @@ impl Subsystem for GeometryDemo {
         renderer.queue_draw(DrawCommand {
             mesh: textured_cube,
             material: cube_material,
-            transform: Transform::from_rotation(
-                Quat::from_rotation_y(0.9 * t) * Quat::from_rotation_x(0.6 * t),
-            ),
+            transform: cube_transform,
         });
 
         for index in 0..RING_COUNT {

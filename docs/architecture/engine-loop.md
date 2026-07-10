@@ -26,14 +26,22 @@ Engine::run()
   └─ run_event_loop()                        boucle OS démarrée
        ├─ on_window_ready(WindowHandle)      fenêtre native créée
        │    ├─ enregistrement du RenderSubsystem (en dernier)
+       │    ├─ déclaration du stage ECS `stages::UPDATE`
        │    └─ init des subsystems           dans l'ordre d'enregistrement
+       │         └─ (ils y enregistrent leurs systèmes ECS)
        ├─ on_event(Event)                    système + entrées, traduits
-       │    └─ CloseRequested → request_exit
+       │    ├─ CloseRequested → request_exit
+       │    └─ pompé en message ECS          world.send_message(event)
        ├─ on_update()                        chaque frame (about_to_wait) :
        │    ├─ gating : rien avant l'échéance de frame (target_fps)
        │    ├─ FrameClock::tick()            delta borné (max 250 ms)
+       │    ├─ tick ECS : ressource Time rafraîchie + Schedule sur le World
+       │    │             (échec → error + request_exit : un monde en état
+       │    │              inconnu ne continue pas)
        │    ├─ clear_draws()                 la RenderQueue repart vide
-       │    ├─ update de chaque subsystem    phase simulation (soumission des draws)
+       │    ├─ update de chaque subsystem    phase simulation (lit l'état ECS
+       │    │                                frais, soumet les draws)
+       │    ├─ clear_messages()              un message vit UN update
        │    ├─ frame_limit éventuel
        │    └─ request_redraw()
        ├─ frame_deadline()                   → ControlFlow::WaitUntil(échéance)
