@@ -39,7 +39,7 @@ Une Entity **n'est qu'une identité** : pas de logique, pas de comportement, pas
 
 Un composant est de la **donnée pure** attachée à une entité — le comportement appartiendra aux systèmes.
 
-- **`Component`** : un marqueur opt-in (`impl Component for MonType {}`) — implémenter documente l'intention. La contrainte `Send + Sync + 'static` prépare le parallélisme futur **par contrainte** (gratuite aujourd'hui), pas par machinerie. `Transform` est le premier composant réel ; Mesh/Material (références d'assets), Camera, Light, Audio, Physics, Script arriveront **chacun avec son système** — l'extensibilité, c'est le trait, pas une liste anticipée.
+- **`Component`** : un marqueur opt-in (`impl Component for MonType {}`) — implémenter documente l'intention. La contrainte `Send + Sync + 'static` prépare le parallélisme futur **par contrainte** (gratuite aujourd'hui), pas par machinerie. `Transform` est le premier composant réel ; `GlobalTransform` est arrivé AVEC son système (`TransformPropagation`, phase 5) — la règle en action ; Mesh/Material (références d'assets), Camera, Light, Audio, Physics, Script arriveront **chacun avec son système** — l'extensibilité, c'est le trait, pas une liste anticipée.
 - **`ComponentStorage<T>` — le sparse set générationnel.** La décision de stockage argumentée :
   - pas le `HashMap` naïf — l'ECS vit d'itérations, elles doivent être denses ;
   - pas les archétypes (bevy/flecs) — sophistication inutile en V1 (déplacements de tables, invalidations, complexité énorme) pour un gain qui ne compte qu'à très grande échelle ; **évolution possible plus tard sans changer le contrat public** ;

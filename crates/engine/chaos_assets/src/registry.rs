@@ -5,13 +5,17 @@ use chaos_core::{AssetId, ChaosError, ChaosResult};
 use log::debug;
 
 /// Type d'une ressource — les types que le moteur sait consommer
-/// aujourd'hui ; audio, scènes, etc. s'ajouteront avec leurs sous-systèmes.
+/// aujourd'hui ; audio, etc. s'ajouteront avec leurs sous-systèmes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetKind {
     Texture,
     Mesh,
     Material,
     Shader,
+    /// Un fichier de scène — le pipeline transporte ses octets (arrivé
+    /// avec le Scene System, phase 5) ; le FORMAT appartient à
+    /// chaos_scene, jamais l'inverse.
+    Scene,
 }
 
 /// État d'une ressource dans son cycle de vie — le loader pilotera les

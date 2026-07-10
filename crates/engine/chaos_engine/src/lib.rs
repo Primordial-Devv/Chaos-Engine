@@ -4,11 +4,12 @@ pub mod context;
 pub mod debug;
 pub mod engine;
 mod render_subsystem;
+pub mod scenes;
 pub mod subsystem;
 
 pub use chaos_core::{
-    Camera, ChaosError, ChaosResult, Color, Entity, Event, InputEvent, KeyCode, Perspective, Time,
-    Transform, WindowEvent, math,
+    AssetId, Camera, ChaosError, ChaosResult, Color, Entity, Event, GlobalTransform, InputEvent,
+    KeyCode, Perspective, SceneId, Time, Transform, WindowEvent, math,
 };
 pub use chaos_ecs::{Commands, Component, Message, Resource, Schedule, System, Systems, World};
 pub use chaos_renderer::{
@@ -17,6 +18,10 @@ pub use chaos_renderer::{
     SamplerFilter, SamplerHandle, ShaderSource, TextureDescriptor, TextureFormat, TextureHandle,
     TextureUsage, TexturedGeometry, TexturedVertex, VertexAttributeFormat, VertexLayout, shaders,
     srgb8_bytes_of,
+};
+pub use chaos_scene::{
+    ChildOf, EntityData, FORMAT_VERSION, MeshRef, Prefab, Scene, SceneData, SceneManager,
+    SceneMember, SceneState, hierarchy,
 };
 pub use chaos_window::WindowConfig;
 pub use config::EngineConfig;

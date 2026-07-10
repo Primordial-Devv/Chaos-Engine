@@ -1,4 +1,4 @@
-use chaos_core::Transform;
+use chaos_core::{GlobalTransform, Transform};
 
 /// Un composant : des DONNÉES attachées à une entité — jamais de
 /// comportement (le comportement appartiendra aux systèmes). L'opt-in est
@@ -8,3 +8,5 @@ use chaos_core::Transform;
 pub trait Component: Send + Sync + 'static {}
 
 impl Component for Transform {}
+
+impl Component for GlobalTransform {}

@@ -2,6 +2,7 @@ use chaos_assets::AssetManager;
 use chaos_core::{ChaosResult, Time};
 use chaos_ecs::{Schedule, World};
 use chaos_renderer::Renderer;
+use chaos_scene::SceneManager;
 
 /// Vue du moteur offerte aux subsystems pendant leurs hooks.
 /// Porte les services partagés : le renderer (`None` hors fenêtre — tests),
@@ -17,6 +18,7 @@ pub struct EngineContext {
     assets: AssetManager,
     world: World,
     schedule: Schedule,
+    scenes: SceneManager,
 }
 
 impl EngineContext {
@@ -64,6 +66,27 @@ impl EngineContext {
     /// leurs systèmes pendant `init` (stage `stages::UPDATE`).
     pub fn schedule_mut(&mut self) -> &mut Schedule {
         &mut self.schedule
+    }
+
+    /// Le point d'entrée unique de la gestion des scènes.
+    pub fn scenes(&self) -> &SceneManager {
+        &self.scenes
+    }
+
+    pub fn scenes_mut(&mut self) -> &mut SceneManager {
+        &mut self.scenes
+    }
+
+    /// Le monde ET le manager de scènes, empruntés ensemble — le besoin de
+    /// `load`/`unload`/`replace` (emprunts disjoints par champs).
+    pub fn world_and_scenes(&mut self) -> (&mut World, &mut SceneManager) {
+        (&mut self.world, &mut self.scenes)
+    }
+
+    /// Le nettoyage du shutdown : toutes les scènes déchargées, registre
+    /// vidé — garanti par le moteur.
+    pub(crate) fn shutdown_scenes(&mut self) -> ChaosResult<()> {
+        self.scenes.shutdown(&mut self.world)
     }
 
     /// Le tick ECS de la frame : la ressource `Time` rafraîchie, puis le
