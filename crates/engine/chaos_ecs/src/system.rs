@@ -238,6 +238,7 @@ mod tests {
             delta: Duration::from_millis(500),
             elapsed: Duration::from_millis(500),
             frame_index: 1,
+            ..Time::default()
         });
         let first = world.spawn().unwrap();
         let second = world.spawn().unwrap();

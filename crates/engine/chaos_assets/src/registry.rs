@@ -146,6 +146,16 @@ impl AssetRegistry {
         self.entries.is_empty()
     }
 
+    /// Le nombre de ressources à l'état `Loaded` — la jauge des metrics
+    /// de santé (itération V1 : pourra devenir un compteur entretenu sans
+    /// changer l'API).
+    pub fn loaded_count(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| matches!(entry.state(), AssetState::Loaded))
+            .count()
+    }
+
     /// Transition d'état pilotée par le loader : la ressource est
     /// matérialisée — la version de contenu s'incrémente (les données
     /// dérivées des versions précédentes sont périmées). Id inconnu →
@@ -214,6 +224,24 @@ mod tests {
             &AssetSource::File(PathBuf::from("assets/textures/brick.png"))
         );
         assert_eq!(entry.state(), &AssetState::Unloaded);
+    }
+
+    #[test]
+    fn loaded_count_follows_the_state_transitions() {
+        let mut registry = AssetRegistry::new();
+        let brick = registry
+            .register("textures/brick", AssetKind::Texture, file_source("a.png"))
+            .unwrap();
+        let crate_mesh = registry
+            .register("models/crate", AssetKind::Mesh, AssetSource::Procedural)
+            .unwrap();
+        assert_eq!(registry.loaded_count(), 0);
+        registry.mark_loaded(brick).unwrap();
+        assert_eq!(registry.loaded_count(), 1);
+        registry.mark_loaded(crate_mesh).unwrap();
+        assert_eq!(registry.loaded_count(), 2);
+        registry.mark_unloaded(brick).unwrap();
+        assert_eq!(registry.loaded_count(), 1);
     }
 
     #[test]

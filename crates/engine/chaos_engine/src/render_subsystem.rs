@@ -1,5 +1,5 @@
 use chaos_core::{Event, WindowEvent};
-use log::{error, info, trace};
+use log::{info, trace};
 
 use crate::context::EngineContext;
 use crate::subsystem::Subsystem;
@@ -12,6 +12,10 @@ pub(crate) struct RenderSubsystem;
 impl Subsystem for RenderSubsystem {
     fn name(&self) -> &str {
         "renderer"
+    }
+
+    fn requires_graphics(&self) -> bool {
+        true
     }
 
     fn on_event(&mut self, event: &Event, context: &mut EngineContext) {
@@ -28,10 +32,7 @@ impl Subsystem for RenderSubsystem {
         };
         match renderer.render_frame() {
             Ok(outcome) => trace!("frame outcome: {outcome:?}"),
-            Err(render_error) => {
-                error!("frame rendering failed: {render_error}");
-                context.request_exit();
-            }
+            Err(render_error) => context.report_fatal(render_error),
         }
     }
 

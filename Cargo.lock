@@ -1840,6 +1840,7 @@ version = "0.2.0"
 dependencies = [
  "chaos_engine",
  "env_logger",
+ "log",
 ]
 
 [[package]]

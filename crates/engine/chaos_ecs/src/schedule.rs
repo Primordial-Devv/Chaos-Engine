@@ -67,12 +67,32 @@ impl Schedule {
     /// l'ordre intra-stage. La première erreur arrête tout le schedule et
     /// nomme le stage (le système fautif est déjà nommé par `Systems`).
     pub fn run(&self, world: &mut World) -> ChaosResult<()> {
-        for stage in &self.stages {
-            stage.systems.run(world).map_err(|error| {
-                ChaosError::Ecs(format!("stage '{}' failed: {error}", stage.name))
-            })?;
+        for index in 0..self.stages.len() {
+            self.run_stage_at(index, world)?;
         }
         Ok(())
+    }
+
+    /// Exécute UN stage par sa position déclarée — le mécanisme
+    /// d'itération offert aux appelants qui pilotent stage par stage
+    /// (l'instrumentation du moteur en tête) ; aucune horloge ici, `run`
+    /// reste LE chemin chaud. Index hors bornes = erreur explicite.
+    pub fn run_stage_at(&self, index: usize, world: &mut World) -> ChaosResult<()> {
+        let Some(stage) = self.stages.get(index) else {
+            return Err(ChaosError::Ecs(format!(
+                "cannot run stage at index {index}: only {} stage(s) declared",
+                self.stages.len()
+            )));
+        };
+        stage
+            .systems
+            .run(world)
+            .map_err(|error| ChaosError::Ecs(format!("stage '{}' failed: {error}", stage.name)))
+    }
+
+    /// Le nom du stage à cette position déclarée, s'il existe.
+    pub fn stage_name_at(&self, index: usize) -> Option<&str> {
+        self.stages.get(index).map(|stage| stage.name.as_str())
     }
 
     pub fn stage_count(&self) -> usize {
@@ -173,6 +193,37 @@ mod tests {
         assert!(error.to_string().contains("'simulation'"));
         assert!(error.to_string().contains("'mover'"));
         assert_eq!(schedule.system_count(), 0);
+    }
+
+    #[test]
+    fn a_single_stage_runs_alone_by_index() {
+        let mut schedule = Schedule::new();
+        schedule.add_stage("first").unwrap();
+        schedule.add_stage("second").unwrap();
+        schedule.add_system("first", Push("early")).unwrap();
+        schedule.add_system("second", Push("late")).unwrap();
+        let mut world = traced_world();
+        schedule.run_stage_at(1, &mut world).unwrap();
+        assert_eq!(world.resource::<Trace>().unwrap().0, vec!["late"]);
+    }
+
+    #[test]
+    fn stage_names_are_read_by_declared_position() {
+        let mut schedule = Schedule::new();
+        schedule.add_stage("update").unwrap();
+        schedule.add_stage("post_update").unwrap();
+        assert_eq!(schedule.stage_name_at(0), Some("update"));
+        assert_eq!(schedule.stage_name_at(1), Some("post_update"));
+        assert_eq!(schedule.stage_name_at(2), None);
+    }
+
+    #[test]
+    fn running_an_out_of_bounds_stage_is_an_explicit_error() {
+        let schedule = Schedule::new();
+        let mut world = traced_world();
+        let error = schedule.run_stage_at(0, &mut world).unwrap_err();
+        assert!(error.to_string().contains("index 0"));
+        assert!(error.to_string().contains("0 stage(s) declared"));
     }
 
     #[test]
