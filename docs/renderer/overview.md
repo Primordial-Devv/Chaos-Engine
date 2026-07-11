@@ -10,7 +10,7 @@ chaos_engine ──► Renderer (API orientée moteur, vocabulaire chaos_core)
                          └─► WgpuBackend (seule zone du moteur qui importe wgpu)
 ```
 
-- **`Renderer`** (`renderer.rs`) — ce que voit le moteur : `attach(target, RendererConfig)`, `resize`, `set_clear_color`, `render_frame`, `description`. Ne parle que le vocabulaire de `chaos_core` (`Color`, `ChaosResult`). Testable sans GPU par injection de backend (`with_backend`, interne) — les tests unitaires de la crate vérifient l'orchestration avec un backend factice.
+- **`Renderer`** (`renderer/`) — ce que voit le moteur : `attach(target, RendererConfig)`, `resize`, `set_clear_color`, `render_frame`, `description`. Ne parle que le vocabulaire de `chaos_core` (`Color`, `ChaosResult`). Testable sans GPU par injection de backend (`with_backend`, interne) — les tests unitaires de la crate vérifient l'orchestration avec un backend factice.
 - **`GraphicsBackend`** (`backend/mod.rs`) — le contrat qu'un backend doit honorer. Remplacer wgpu par un backend maison (Vulkan, DirectX 12, Metal) = implémenter ce trait, rien d'autre à toucher dans le moteur.
 - **`WgpuBackend`** (`backend/wgpu/`) — l'unique zone du workspace qui importe wgpu. Détient surface, device, queue et configuration.
 
@@ -24,7 +24,18 @@ chaos_renderer/src/
 ├── debug.rs         DebugDraw / DebugShape / DebugDepth — le debug rendering (lignes monde)
 ├── diagnostics.rs   RendererDiagnostics / GpuTiming — le snapshot de ce que la frame coûte
 ├── environment.rs   EnvironmentDescriptor / EnvironmentInfo — cubemap, intensité, ciel
-├── renderer.rs      Renderer — orchestrateur haut niveau + registre des meshes (+ tests mock)
+├── renderer/        Renderer — le struct + les types transverses + render_frame/render_to_target
+│   ├── mod.rs           l'orchestrateur : définition, construction, coordination de frame
+│   ├── pipelines.rs     la fabrique de pipelines — les cinq caches de permutations
+│   ├── resolve.rs       le cœur chaud : file → plan (opacité, culling, batching, moisson d'ombre)
+│   ├── resources.rs     buffers, textures, samplers, cibles — limites, retraite, stats
+│   ├── materials.rs     création validée, mises à jour in-place, destruction
+│   ├── meshes.rs        la géométrie matérialisée en buffers + ses bounds
+│   ├── lighting.rs      lumières, ambiante, environnement, exposition, réglages d'ombre
+│   ├── passes.rs        le registre des passes déclarées et leurs files
+│   ├── debug_draws.rs   le store du debug rendering et sa résolution par passe
+│   ├── instrumentation.rs  l'analyse des draws, la clôture des diagnostics, le budget CPU
+│   └── tests/           les tests white-box par domaine (support.rs + 13 fichiers, 201 tests)
 ├── frame.rs         DrawCommand / FrameDraw / FramePlan / FrameOutcome / FrameSkipReason
 ├── queue.rs         RenderQueue — ordre de rendu (tri stable par pipeline)
 ├── geometry.rs      Geometry + TexturedGeometry — données CPU, constructeurs triangle / quad / cube

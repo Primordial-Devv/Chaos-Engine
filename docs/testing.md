@@ -41,7 +41,7 @@ La suite DURABLE qui protège le renderer mature V1 — NOIRE-BOÎTE (l'API
 publique, les diagnostics, les stats : le niveau contrat), dans son
 propre module (`src/suite.rs`), sur le banc d'essai partagé
 (`src/testing.rs` — le `MockBackend` à journal, extrait de
-`renderer.rs`, à l'issue COMMUTABLE : pertes de surface et erreurs
+`renderer/`, à l'issue COMMUTABLE : pertes de surface et erreurs
 backend se scénarisent en cours de run). Quatre familles, douze tests :
 
 - **LA SCÈNE CANONIQUE** (le cœur) : environnement HDR + ciel + IBL,
