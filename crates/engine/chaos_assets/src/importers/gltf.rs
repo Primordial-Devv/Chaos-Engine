@@ -11,9 +11,9 @@ use crate::registry::AssetKind;
 /// chunk binaire GLB ou de data URIs base64 embarquées ; les fichiers
 /// externes (`.bin`) exigeront la résolution de dépendances entre assets —
 /// erreur explicite en attendant. Périmètre V1 : la première primitive
-/// TRIANGLES du premier mesh, positions + UV + indices ; les normales
-/// arriveront avec le vertex éclairé, les matériaux glTF avec leur
-/// sous-phase.
+/// TRIANGLES du premier mesh, positions + normales (optionnelles — vides
+/// si le fichier n'en porte pas, le consommateur synthétise) + UV +
+/// indices ; les matériaux glTF viendront avec leur sous-phase.
 pub struct GltfImporter;
 
 impl AssetImporter for GltfImporter {
@@ -80,6 +80,10 @@ fn parse_gltf(name: &str, bytes: &[u8]) -> ChaosResult<MeshData> {
         )));
     };
     let positions: Vec<[f32; 3]> = position_reader.collect();
+    let normals: Vec<[f32; 3]> = match reader.read_normals() {
+        Some(normal_reader) => normal_reader.collect(),
+        None => Vec::new(),
+    };
     let uvs: Vec<[f32; 2]> = match reader.read_tex_coords(0) {
         Some(tex_coords) => tex_coords.into_f32().collect(),
         None => vec![[0.0, 0.0]; positions.len()],
@@ -97,6 +101,7 @@ fn parse_gltf(name: &str, bytes: &[u8]) -> ChaosResult<MeshData> {
     };
     Ok(MeshData {
         positions,
+        normals,
         uvs,
         indices,
     })
@@ -230,6 +235,41 @@ mod tests {
         );
         assert_eq!(data.uvs, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
         assert_eq!(data.indices, vec![0, 1, 2]);
+        // Pas d'accessor NORMAL : les normales sont VIDES (absentes),
+        // jamais des zéros dégénérés — le consommateur synthétise.
+        assert!(data.normals.is_empty());
+    }
+
+    fn lit_triangle_glb() -> Vec<u8> {
+        let mut bin = f32_bytes(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        bin.extend(f32_bytes(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]));
+        bin.extend(f32_bytes(&[0.0, 0.0, 1.0, 0.0, 0.0, 1.0]));
+        bin.extend(u16_bytes(&[0, 1, 2]));
+        let json = r#"{"asset":{"version":"2.0"},
+            "buffers":[{"byteLength":102}],
+            "bufferViews":[
+                {"buffer":0,"byteOffset":0,"byteLength":36},
+                {"buffer":0,"byteOffset":36,"byteLength":36},
+                {"buffer":0,"byteOffset":72,"byteLength":24},
+                {"buffer":0,"byteOffset":96,"byteLength":6}],
+            "accessors":[
+                {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0.0,0.0,0.0],"max":[1.0,1.0,0.0]},
+                {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+                {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+                {"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}],
+            "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3}]}]}"#;
+        build_glb(json, &bin)
+    }
+
+    #[test]
+    fn glb_with_normals_imports_them() {
+        let ImportedAsset::Mesh(data) = GltfImporter.import("m", &lit_triangle_glb()).unwrap()
+        else {
+            panic!("kind inattendu");
+        };
+        assert_eq!(data.normals, vec![[0.0, 0.0, 1.0]; 3]);
+        assert_eq!(data.positions.len(), 3);
+        assert!(data.validate("m").is_ok());
     }
 
     #[test]

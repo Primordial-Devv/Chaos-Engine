@@ -1,33 +1,40 @@
 use crate::frame::DrawCommand;
 
 /// File de rendu du moteur : reçoit les soumissions en ordre de scène et
-/// rend l'ordre de rendu. Clé actuelle : le **material** — un material
-/// implique un pipeline et un bind group, le tri stable regroupe donc les
-/// deux états GPU ; l'ordre de soumission est préservé à clé égale. La clé
-/// grandira (passe, opaque/transparent, profondeur, tri composite
-/// pipeline+material) sans changer ce contrat.
+/// rend l'ordre de rendu. Clé actuelle : le **(material, mesh)** — le
+/// material implique pipeline et bind group, le mesh ses buffers : le
+/// tri stable regroupe les états GPU ET forme les runs que l'instancing
+/// automatique fusionne ; l'ordre de soumission est préservé à clé
+/// égale. La partition par opacité et le tri par profondeur des
+/// transparents vivent EN AVAL, à la résolution de la passe (les
+/// records de materials y sont accessibles — `resolve_pass_draws`).
 #[derive(Default)]
 pub struct RenderQueue {
     commands: Vec<DrawCommand>,
 }
 
 impl RenderQueue {
+    /// File vide.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Soumet un draw en ordre de scène.
     pub fn submit(&mut self, command: DrawCommand) {
         self.commands.push(command);
     }
 
+    /// Vide la file — le début de chaque frame de simulation.
     pub fn clear(&mut self) {
         self.commands.clear();
     }
 
+    /// Le nombre de draws soumis.
     pub fn len(&self) -> usize {
         self.commands.len()
     }
 
+    /// La file est-elle vide ?
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty()
     }
@@ -36,7 +43,8 @@ impl RenderQueue {
     /// quand la file est déjà en ordre (présentations répétées d'une même
     /// frame de simulation).
     pub fn ordered(&mut self) -> &[DrawCommand] {
-        self.commands.sort_by_key(|command| command.material.index);
+        self.commands
+            .sort_by_key(|command| (command.material.index, command.mesh.index));
         &self.commands
     }
 }
@@ -104,6 +112,33 @@ mod tests {
             signature(&mut queue),
             vec![(0, 2.0), (0, 4.0), (1, 1.0), (1, 3.0)]
         );
+    }
+
+    #[test]
+    fn a_material_groups_by_mesh_stably() {
+        let mut queue = RenderQueue::new();
+        let piece = |material: u32, mesh: u32, x: f32| DrawCommand {
+            mesh: MeshHandle {
+                index: mesh,
+                generation: 0,
+            },
+            material: MaterialHandle {
+                index: material,
+                generation: 0,
+            },
+            transform: Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+        };
+        queue.submit(piece(0, 1, 1.0));
+        queue.submit(piece(0, 0, 2.0));
+        queue.submit(piece(0, 1, 3.0));
+        // La clé composite (material, mesh) forme les runs de
+        // l'instancing ; l'ordre de soumission tient à clé égale.
+        let signature: Vec<(u32, f32)> = queue
+            .ordered()
+            .iter()
+            .map(|command| (command.mesh.index, command.transform.translation.x))
+            .collect();
+        assert_eq!(signature, vec![(0, 2.0), (1, 1.0), (1, 3.0)]);
     }
 
     #[test]

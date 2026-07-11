@@ -6,9 +6,12 @@ pub struct BufferHandle {
     pub(crate) generation: u32,
 }
 
+/// Le rôle d'un buffer GPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferKind {
+    /// Un vertex buffer (sommets).
     Vertex,
+    /// Un index buffer (indices u16).
     Index,
 }
 
@@ -17,12 +20,16 @@ pub enum BufferKind {
 /// viendront avec leurs besoins réels).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BufferDescriptor {
+    /// Le label de diagnostic.
     pub label: String,
+    /// Le rôle du buffer.
     pub kind: BufferKind,
+    /// Les octets uploadés à la création — jamais vides (validé).
     pub contents: Vec<u8>,
 }
 
 impl BufferDescriptor {
+    /// Descripteur d'un vertex buffer.
     pub fn vertex(label: impl Into<String>, contents: Vec<u8>) -> Self {
         Self {
             label: label.into(),
@@ -31,6 +38,7 @@ impl BufferDescriptor {
         }
     }
 
+    /// Descripteur d'un index buffer.
     pub fn index(label: impl Into<String>, contents: Vec<u8>) -> Self {
         Self {
             label: label.into(),

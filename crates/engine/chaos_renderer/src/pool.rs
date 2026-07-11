@@ -54,6 +54,13 @@ impl<T> ResourcePool<T> {
             .and_then(|slot| slot.value.as_ref())
     }
 
+    pub(crate) fn get_mut(&mut self, handle: PoolHandle) -> Option<&mut T> {
+        self.slots
+            .get_mut(handle.index as usize)
+            .filter(|slot| slot.generation == handle.generation)
+            .and_then(|slot| slot.value.as_mut())
+    }
+
     pub(crate) fn remove(&mut self, handle: PoolHandle) -> Option<T> {
         let slot = self.slots.get_mut(handle.index as usize)?;
         if slot.generation != handle.generation || slot.value.is_none() {
@@ -63,6 +70,10 @@ impl<T> ResourcePool<T> {
         slot.generation = slot.generation.wrapping_add(1);
         self.free.push(handle.index);
         value
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.slots.len() - self.free.len()
     }
 }
 

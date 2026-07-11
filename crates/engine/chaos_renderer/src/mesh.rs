@@ -1,3 +1,5 @@
+use chaos_core::math::Aabb;
+
 use crate::resources::{BufferHandle, VertexLayout};
 
 /// Identifiant opaque d'un mesh. Générationnel : un handle dont le mesh a
@@ -9,12 +11,14 @@ pub struct MeshHandle {
 }
 
 /// Ressource mesh côté renderer : géométrie résidente GPU prête à dessiner —
-/// buffers possédés, draw info et vertex format. Portera les bounds (AABB)
-/// quand le culling en aura besoin.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// buffers possédés, draw info, vertex format et BOUNDS locaux (l'AABB
+/// des positions, calculé à la création — `None` = jamais cullé, le
+/// défaut sûr des géométries vides ou dégénérées).
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MeshRecord {
     pub(crate) vertex_buffer: BufferHandle,
     pub(crate) index_buffer: Option<BufferHandle>,
     pub(crate) element_count: u32,
     pub(crate) vertex_layout: VertexLayout,
+    pub(crate) bounds: Option<Aabb>,
 }

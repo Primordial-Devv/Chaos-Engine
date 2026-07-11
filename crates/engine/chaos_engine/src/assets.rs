@@ -5,8 +5,11 @@
 //! sans aucune dépendance au renderer.
 
 use chaos_assets::{MeshData, TextureData};
+use chaos_core::math::Vec3;
 use chaos_core::{ChaosError, ChaosResult};
-use chaos_renderer::{TextureDescriptor, TextureFormat, TexturedGeometry, TexturedVertex};
+use chaos_renderer::{
+    LitGeometry, LitVertex, TextureDescriptor, TextureFormat, TexturedGeometry, TexturedVertex,
+};
 
 pub use chaos_assets::{
     AssetEntry, AssetImporter, AssetKind, AssetManager, AssetSource, AssetState, ImportedAsset,
@@ -24,12 +27,11 @@ pub fn texture_descriptor(
     TextureDescriptor::sampled(label, data.width, data.height, format, data.pixels.clone())
 }
 
-/// Données de mesh neutres → géométrie texturée du renderer. C'est ici que
-/// vit la limite u16 du renderer : un mesh de plus de 65 536 sommets est
+/// La limite u16 du renderer : un mesh de plus de 65 536 sommets est
 /// refusé avec une erreur explicite (les indices 32 bits viendront avec
 /// leur besoin) — les indices, déjà validés par la porte du pipeline
 /// (tous < positions.len()), se convertissent ensuite sans risque.
-pub fn textured_geometry(name: &str, data: &MeshData) -> ChaosResult<TexturedGeometry> {
+fn check_u16_limit(name: &str, data: &MeshData) -> ChaosResult<()> {
     const MAX_VERTICES: usize = u16::MAX as usize + 1;
     if data.positions.len() > MAX_VERTICES {
         return Err(ChaosError::Asset(format!(
@@ -37,6 +39,12 @@ pub fn textured_geometry(name: &str, data: &MeshData) -> ChaosResult<TexturedGeo
             data.positions.len()
         )));
     }
+    Ok(())
+}
+
+/// Données de mesh neutres → géométrie texturée du renderer.
+pub fn textured_geometry(name: &str, data: &MeshData) -> ChaosResult<TexturedGeometry> {
+    check_u16_limit(name, data)?;
     let vertices = data
         .positions
         .iter()
@@ -54,6 +62,67 @@ pub fn textured_geometry(name: &str, data: &MeshData) -> ChaosResult<TexturedGeo
     Ok(TexturedGeometry { vertices, indices })
 }
 
+/// Données de mesh neutres → géométrie ÉCLAIRABLE du renderer. Les
+/// normales du fichier sont appariées telles quelles ; un mesh SANS
+/// normales (elles sont optionnelles à l'import) les reçoit par SYNTHÈSE
+/// PLATE : la normale de chaque triangle (produit vectoriel, enroulement
+/// CCW — la convention d'import) est accumulée sur ses sommets puis
+/// normalisée — un sommet partagé entre faces coplanaires garde la
+/// normale exacte de la face. Un sommet orphelin ou dégénéré retombe
+/// sur +Y.
+pub fn lit_geometry(name: &str, data: &MeshData) -> ChaosResult<LitGeometry> {
+    check_u16_limit(name, data)?;
+    let normals: Vec<[f32; 3]> = if data.normals.is_empty() {
+        synthesize_flat_normals(data)
+    } else {
+        data.normals.clone()
+    };
+    let vertices = data
+        .positions
+        .iter()
+        .zip(&normals)
+        .zip(&data.uvs)
+        .map(|((position, normal), uv)| LitVertex {
+            position: *position,
+            normal: *normal,
+            uv: *uv,
+        })
+        .collect();
+    let indices = data
+        .indices
+        .iter()
+        .map(|index| u16::try_from(*index).unwrap_or(u16::MAX))
+        .collect();
+    Ok(LitGeometry { vertices, indices })
+}
+
+fn synthesize_flat_normals(data: &MeshData) -> Vec<[f32; 3]> {
+    let mut accumulated = vec![Vec3::ZERO; data.positions.len()];
+    for triangle in data.indices.chunks(3) {
+        let [a, b, c] = [
+            triangle[0] as usize,
+            triangle[1] as usize,
+            triangle[2] as usize,
+        ];
+        let edge_ab = Vec3::from_array(data.positions[b]) - Vec3::from_array(data.positions[a]);
+        let edge_ac = Vec3::from_array(data.positions[c]) - Vec3::from_array(data.positions[a]);
+        let face_normal = edge_ab.cross(edge_ac);
+        for index in [a, b, c] {
+            accumulated[index] += face_normal;
+        }
+    }
+    accumulated
+        .into_iter()
+        .map(|normal| {
+            if normal.length_squared() < f32::EPSILON {
+                Vec3::Y.to_array()
+            } else {
+                normal.normalize().to_array()
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,6 +131,7 @@ mod tests {
     fn mesh_data() -> MeshData {
         MeshData {
             positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: Vec::new(),
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
             indices: vec![0, 1, 2],
         }
@@ -98,11 +168,14 @@ mod tests {
         let count = usize::from(u16::MAX) + 2;
         let data = MeshData {
             positions: vec![[0.0, 0.0, 0.0]; count],
+            normals: Vec::new(),
             uvs: vec![[0.0, 0.0]; count],
             indices: vec![0, 1, 2],
         };
         let error = textured_geometry("huge", &data).unwrap_err();
         assert!(error.to_string().contains("u16 index limit"));
+        let lit_error = lit_geometry("huge", &data).unwrap_err();
+        assert!(lit_error.to_string().contains("u16 index limit"));
     }
 
     #[test]
@@ -111,5 +184,54 @@ mod tests {
         data.uvs[2] = [0.25, 0.75];
         let geometry = textured_geometry("m", &data).unwrap();
         assert_eq!(geometry.vertices[2].uv, [0.25, 0.75]);
+    }
+
+    #[test]
+    fn lit_geometry_pairs_the_file_normals() {
+        let mut data = mesh_data();
+        data.normals = vec![[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+        let geometry = lit_geometry("m", &data).unwrap();
+        assert_eq!(geometry.vertices.len(), 3);
+        assert_eq!(geometry.vertices[1].position, [1.0, 0.0, 0.0]);
+        assert_eq!(geometry.vertices[1].normal, [0.0, 1.0, 0.0]);
+        assert_eq!(geometry.vertices[1].uv, [1.0, 0.0]);
+        assert_eq!(geometry.indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn lit_geometry_synthesizes_flat_normals_when_absent() {
+        // Le quad du sol réel (floor.glb) : plan XY, deux triangles CCW —
+        // la synthèse doit rendre EXACTEMENT +Z sur les quatre sommets.
+        let data = MeshData {
+            positions: vec![
+                [-0.5, -0.5, 0.0],
+                [0.5, -0.5, 0.0],
+                [0.5, 0.5, 0.0],
+                [-0.5, 0.5, 0.0],
+            ],
+            normals: Vec::new(),
+            uvs: vec![[0.0, 0.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        let geometry = lit_geometry("floor", &data).unwrap();
+        for vertex in &geometry.vertices {
+            assert_eq!(vertex.normal, [0.0, 0.0, 1.0]);
+        }
+    }
+
+    #[test]
+    fn a_degenerate_vertex_falls_back_to_up() {
+        // Un triangle d'aire nulle n'a pas de normale : le sommet retombe
+        // sur +Y au lieu de produire des NaN.
+        let data = MeshData {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            normals: Vec::new(),
+            uvs: vec![[0.0, 0.0]; 3],
+            indices: vec![0, 1, 2],
+        };
+        let geometry = lit_geometry("degenerate", &data).unwrap();
+        for vertex in &geometry.vertices {
+            assert_eq!(vertex.normal, [0.0, 1.0, 0.0]);
+        }
     }
 }

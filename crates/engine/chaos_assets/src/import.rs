@@ -39,18 +39,23 @@ impl TextureData {
 /// Données de mesh neutres — repère main droite, +Y haut, -Z avant (le
 /// glTF natif partage les conventions du moteur : zéro conversion de
 /// repère), UV origine en haut à gauche. `uvs.len() == positions.len()`
-/// (zéros si absentes) ; indices en u32 — la contrainte u16 du renderer
-/// appartient au consommateur, pas à l'import.
+/// (zéros si absentes) ; `normals` VIDES si absentes — l'asymétrie avec
+/// les UV est assumée : une normale nulle serait dégénérée, le
+/// consommateur synthétise (à plat depuis les triangles CCW) quand le
+/// fichier n'en porte pas ; indices en u32 — la contrainte u16 du
+/// renderer appartient au consommateur, pas à l'import.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
 }
 
 impl MeshData {
     /// Cohérence sémantique : positions non vides et finies (NaN/infini
-    /// rejetés, UV comprises), UV appariées aux positions, indices non
+    /// rejetés, UV et normales comprises), UV appariées aux positions,
+    /// normales appariées SI présentes (vides = absentes), indices non
     /// vides, multiples de 3 (triangles) et tous dans les bornes — jamais
     /// de lecture hors limites côté GPU.
     pub fn validate(&self, name: &str) -> ChaosResult<()> {
@@ -76,6 +81,18 @@ impl MeshData {
             return Err(ChaosError::Asset(format!(
                 "mesh '{name}' has {} UVs for {} positions",
                 self.uvs.len(),
+                self.positions.len()
+            )));
+        }
+        if !self.normals.iter().flatten().all(|value| value.is_finite()) {
+            return Err(ChaosError::Asset(format!(
+                "mesh '{name}' has non-finite normals (NaN or infinity)"
+            )));
+        }
+        if !self.normals.is_empty() && self.normals.len() != self.positions.len() {
+            return Err(ChaosError::Asset(format!(
+                "mesh '{name}' has {} normals for {} positions",
+                self.normals.len(),
                 self.positions.len()
             )));
         }
@@ -158,6 +175,7 @@ mod tests {
     fn sane_mesh() -> MeshData {
         MeshData {
             positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: Vec::new(),
             uvs: vec![[0.0, 0.0]; 3],
             indices: vec![0, 1, 2],
         }
@@ -196,11 +214,30 @@ mod tests {
     fn empty_mesh_is_rejected() {
         let mesh = MeshData {
             positions: Vec::new(),
+            normals: Vec::new(),
             uvs: Vec::new(),
             indices: Vec::new(),
         };
         let error = mesh.validate("m").unwrap_err();
         assert!(error.to_string().contains("no positions"));
+    }
+
+    #[test]
+    fn mismatched_normals_are_rejected() {
+        let mut mesh = sane_mesh();
+        mesh.normals = vec![[0.0, 0.0, 1.0]; 2];
+        let error = mesh.validate("m").unwrap_err();
+        assert!(error.to_string().contains("2 normals for 3 positions"));
+        mesh.normals = vec![[0.0, 0.0, 1.0]; 3];
+        assert!(mesh.validate("m").is_ok());
+    }
+
+    #[test]
+    fn non_finite_normals_are_rejected() {
+        let mut mesh = sane_mesh();
+        mesh.normals = vec![[0.0, f32::NAN, 1.0]; 3];
+        let error = mesh.validate("m").unwrap_err();
+        assert!(error.to_string().contains("non-finite normals"));
     }
 
     #[test]
