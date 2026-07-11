@@ -23,6 +23,17 @@
 - Rebase merge désactivé au niveau du repo.
 - Une PR = un sujet. Les branches de travail sont jetables et de courte durée.
 
+## Protections GitHub
+
+Deux rulesets actifs (repo public), aux exigences adaptées au sens du flux :
+
+| Ruleset | Cible | Règles |
+|---|---|---|
+| `protect-dev` | `dev` | PR obligatoire, checks `check`/`fmt`/`clippy` requis, **branche à jour exigée** (pertinent pour `feature → dev`), merges squash + commit |
+| `protect-main` | `main` | PR obligatoire, checks requis, à-jour non exigé (les releases `dev → main` passent sans back-merge), **merge commit uniquement** |
+
+Communs aux deux : force-push et suppression de branche bloqués, aucun acteur de bypass. La scission existe parce qu'un ruleset unique exigeant « à jour » partout auto-bloquait les releases : `main` porte des merge commits que `dev` ne peut pas rattraper, `dev` étant elle-même protégée.
+
 ## CI
 
 Le workflow `.github/workflows/ci.yml` exécute `cargo check`, `cargo fmt --check` et `cargo clippy --all-targets --all-features -- -D warnings` sur **chaque push de n'importe quelle branche** (retour immédiat dès le premier push, avant même d'ouvrir une PR) et sur chaque PR vers `dev`/`main` (validation du résultat du merge). Quand une PR est ouverte, un push déclenche donc les deux — le repo étant public, les minutes Actions sont gratuites.

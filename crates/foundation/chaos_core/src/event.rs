@@ -15,6 +15,8 @@ pub enum WindowEvent {
     Moved { x: i32, y: i32 },
     Focused(bool),
     ScaleFactorChanged { scale_factor: f64 },
+    Suspended,
+    Resumed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

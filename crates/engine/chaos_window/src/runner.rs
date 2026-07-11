@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use chaos_core::{ChaosError, ChaosResult, Event};
+use chaos_core::{ChaosError, ChaosResult, Event, WindowEvent};
 use log::{debug, error};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -67,6 +67,9 @@ struct WinitApp<'a> {
 impl ApplicationHandler for WinitApp<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
+            // La fenêtre existe : c'est une VRAIE reprise (lifecycle OS),
+            // pas la création initiale — traduite pour le moteur.
+            self.handler.on_event(Event::Window(WindowEvent::Resumed));
             return;
         }
         let attributes = Window::default_attributes()
@@ -89,6 +92,11 @@ impl ApplicationHandler for WinitApp<'_> {
                 event_loop.exit();
             }
         }
+    }
+
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        debug!("application suspended by the OS");
+        self.handler.on_event(Event::Window(WindowEvent::Suspended));
     }
 
     fn window_event(

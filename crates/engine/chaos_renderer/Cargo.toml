@@ -13,5 +13,8 @@ pollster.workspace = true
 raw-window-handle.workspace = true
 wgpu.workspace = true
 
+[dev-dependencies]
+naga.workspace = true
+
 [lints]
 workspace = true

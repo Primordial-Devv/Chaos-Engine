@@ -1,0 +1,16 @@
+chaos-scene 1
+name scenes/demo
+entity
+transform 0 -1 0 -0.70710677 0 0 0.70710677 20 20 1
+mesh d496caaebf25bc2a
+entity
+transform 0 0 0 0 0 0 1 1 1 1
+mesh 40eb6ab7ce746fce
+entity
+transform 1.1 0.35 0 0 0 0 1 0.3 0.3 0.3
+mesh 40eb6ab7ce746fce
+parent 1
+entity
+transform -1.1 -0.35 0 0 0 0 1 0.3 0.3 0.3
+mesh 40eb6ab7ce746fce
+parent 1
