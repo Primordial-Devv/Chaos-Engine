@@ -1,18 +1,22 @@
 use chaos_core::Color;
 use chaos_core::math::Vec3;
 
-use crate::resources::{ColorVertex, TexturedVertex, bytes_of_u16};
+use crate::resources::{ColorVertex, LitVertex, TexturedVertex, bytes_of_u16};
 
 /// Géométrie côté CPU : la donnée moteur, indépendante de toute
 /// représentation GPU. `indices` vide = rendu non indexé.
 /// Indices en u16 pour l'instant ; u32 viendra avec les gros meshes.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Geometry {
+    /// Les sommets colorés.
     pub vertices: Vec<ColorVertex>,
+    /// Les indices u16 ; vide = rendu non indexé.
     pub indices: Vec<u16>,
 }
 
 impl Geometry {
+    /// Triangle non indexé, une couleur par sommet (dégradé) — pointe en
+    /// haut, enroulement CCW.
     pub fn triangle(center: [f32; 3], size: f32, colors: [Color; 3]) -> Self {
         let half = size / 2.0;
         let positions = [
@@ -34,6 +38,8 @@ impl Geometry {
         }
     }
 
+    /// Quad indexé (4 sommets, 6 indices) dans le plan XY, couleur unie,
+    /// enroulement CCW.
     pub fn quad(center: [f32; 3], width: f32, height: f32, color: Color) -> Self {
         let half_width = width / 2.0;
         let half_height = height / 2.0;
@@ -97,6 +103,7 @@ impl Geometry {
         Self { vertices, indices }
     }
 
+    /// La géométrie est-elle indexée ?
     pub fn is_indexed(&self) -> bool {
         !self.indices.is_empty()
     }
@@ -111,10 +118,12 @@ impl Geometry {
         u32::try_from(count).unwrap_or(u32::MAX)
     }
 
+    /// Les sommets sérialisés pour un vertex buffer.
     pub fn vertex_bytes(&self) -> Vec<u8> {
         ColorVertex::bytes_of(&self.vertices)
     }
 
+    /// Les indices sérialisés pour un index buffer.
     pub fn index_bytes(&self) -> Vec<u8> {
         bytes_of_u16(&self.indices)
     }
@@ -125,7 +134,9 @@ impl Geometry {
 /// des vertex formats arbitraires ; d'ici là, chacun reste simple.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TexturedGeometry {
+    /// Les sommets texturés.
     pub vertices: Vec<TexturedVertex>,
+    /// Les indices u16 ; vide = rendu non indexé.
     pub indices: Vec<u16>,
 }
 
@@ -196,6 +207,7 @@ impl TexturedGeometry {
         }
     }
 
+    /// La géométrie est-elle indexée ?
     pub fn is_indexed(&self) -> bool {
         !self.indices.is_empty()
     }
@@ -210,10 +222,157 @@ impl TexturedGeometry {
         u32::try_from(count).unwrap_or(u32::MAX)
     }
 
+    /// Les sommets sérialisés pour un vertex buffer.
     pub fn vertex_bytes(&self) -> Vec<u8> {
         TexturedVertex::bytes_of(&self.vertices)
     }
 
+    /// Les indices sérialisés pour un index buffer.
+    pub fn index_bytes(&self) -> Vec<u8> {
+        bytes_of_u16(&self.indices)
+    }
+}
+
+/// Géométrie CPU à sommets ÉCLAIRABLES (position + normale + UV) — mêmes
+/// contrats que `TexturedGeometry`. Les constructeurs cessent de jeter
+/// les normales de face qu'ils calculaient déjà.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LitGeometry {
+    /// Les sommets éclairables.
+    pub vertices: Vec<LitVertex>,
+    /// Les indices u16 ; vide = rendu non indexé.
+    pub indices: Vec<u16>,
+}
+
+impl LitGeometry {
+    /// Cube éclairable fermé : 24 sommets (4 par face — la normale de
+    /// face exige des sommets non partagés), UV 0..1 par face, 36
+    /// indices. Faces ordonnées +X, -X, +Y, -Y, +Z, -Z ; enroulement CCW
+    /// vu de l'extérieur — mêmes conventions que `TexturedGeometry::cube`.
+    pub fn cube(center: [f32; 3], size: f32) -> Self {
+        let half = size / 2.0;
+        let origin = Vec3::from_array(center);
+        let faces = [
+            (Vec3::X, Vec3::NEG_Z, Vec3::Y),
+            (Vec3::NEG_X, Vec3::Z, Vec3::Y),
+            (Vec3::Y, Vec3::X, Vec3::NEG_Z),
+            (Vec3::NEG_Y, Vec3::X, Vec3::Z),
+            (Vec3::Z, Vec3::X, Vec3::Y),
+            (Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y),
+        ];
+        let corner_uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        let mut vertices = Vec::with_capacity(24);
+        let mut indices = Vec::with_capacity(36);
+        for (normal, u, v) in faces {
+            let base = u16::try_from(vertices.len()).unwrap_or(u16::MAX);
+            let corners = [
+                origin + (normal - u - v) * half,
+                origin + (normal + u - v) * half,
+                origin + (normal + u + v) * half,
+                origin + (normal - u + v) * half,
+            ];
+            for (corner, uv) in corners.into_iter().zip(corner_uvs) {
+                vertices.push(LitVertex {
+                    position: corner.to_array(),
+                    normal: normal.to_array(),
+                    uv,
+                });
+            }
+            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+        Self { vertices, indices }
+    }
+
+    /// Sphère UV éclairable : `rings` anneaux de latitude × `segments`
+    /// méridiens (clampés — minimum 3×2, maximum sous la limite u16 :
+    /// jamais d'écrasement silencieux), normales RADIALES unitaires, UV
+    /// équirectangulaires (φ/2π, θ/π), enroulement CCW vu de l'extérieur.
+    pub fn sphere(center: [f32; 3], radius: f32, segments: u32, rings: u32) -> Self {
+        let segments = segments.clamp(3, 254);
+        let rings = rings.clamp(2, 254);
+        let origin = Vec3::from_array(center);
+        let mut vertices = Vec::with_capacity(((rings + 1) * (segments + 1)) as usize);
+        for ring in 0..=rings {
+            let theta = std::f32::consts::PI * (ring as f32) / (rings as f32);
+            let (sin_theta, cos_theta) = theta.sin_cos();
+            for segment in 0..=segments {
+                let phi = std::f32::consts::TAU * (segment as f32) / (segments as f32);
+                let (sin_phi, cos_phi) = phi.sin_cos();
+                let direction = Vec3::new(sin_theta * cos_phi, cos_theta, sin_theta * sin_phi);
+                vertices.push(LitVertex {
+                    position: (origin + direction * radius).to_array(),
+                    normal: direction.to_array(),
+                    uv: [segment as f32 / segments as f32, ring as f32 / rings as f32],
+                });
+            }
+        }
+        let mut indices = Vec::with_capacity((rings * segments * 6) as usize);
+        let stride = segments + 1;
+        for ring in 0..rings {
+            for segment in 0..segments {
+                let a = u16::try_from(ring * stride + segment).unwrap_or(u16::MAX);
+                let b = u16::try_from((ring + 1) * stride + segment).unwrap_or(u16::MAX);
+                indices.extend_from_slice(&[a, a + 1, b + 1, a, b + 1, b]);
+            }
+        }
+        Self { vertices, indices }
+    }
+
+    /// Quad éclairable dans le plan XY, normale +Z (cohérente avec
+    /// l'enroulement CCW) : UV 0..`uv_scale`.
+    pub fn quad(center: [f32; 3], width: f32, height: f32, uv_scale: f32) -> Self {
+        let half_width = width / 2.0;
+        let half_height = height / 2.0;
+        let normal = [0.0, 0.0, 1.0];
+        let vertices = vec![
+            LitVertex {
+                position: [center[0] - half_width, center[1] - half_height, center[2]],
+                normal,
+                uv: [0.0, uv_scale],
+            },
+            LitVertex {
+                position: [center[0] + half_width, center[1] - half_height, center[2]],
+                normal,
+                uv: [uv_scale, uv_scale],
+            },
+            LitVertex {
+                position: [center[0] + half_width, center[1] + half_height, center[2]],
+                normal,
+                uv: [uv_scale, 0.0],
+            },
+            LitVertex {
+                position: [center[0] - half_width, center[1] + half_height, center[2]],
+                normal,
+                uv: [0.0, 0.0],
+            },
+        ];
+        Self {
+            vertices,
+            indices: vec![0, 1, 2, 0, 2, 3],
+        }
+    }
+
+    /// La géométrie est-elle indexée ?
+    pub fn is_indexed(&self) -> bool {
+        !self.indices.is_empty()
+    }
+
+    /// Nombre d'éléments à dessiner : indices si indexé, sommets sinon.
+    pub fn element_count(&self) -> u32 {
+        let count = if self.is_indexed() {
+            self.indices.len()
+        } else {
+            self.vertices.len()
+        };
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    /// Les sommets sérialisés pour un vertex buffer.
+    pub fn vertex_bytes(&self) -> Vec<u8> {
+        LitVertex::bytes_of(&self.vertices)
+    }
+
+    /// Les indices sérialisés pour un index buffer.
     pub fn index_bytes(&self) -> Vec<u8> {
         bytes_of_u16(&self.indices)
     }
@@ -371,5 +530,43 @@ mod tests {
             let centroid = (a + b + c) / 3.0;
             assert!(normal.dot(centroid - center) > 0.0);
         }
+    }
+
+    #[test]
+    fn the_sphere_is_radial_and_ccw() {
+        let center = Vec3::new(1.0, -2.0, 0.5);
+        let sphere = LitGeometry::sphere(center.to_array(), 2.0, 12, 8);
+        assert_eq!(sphere.vertices.len(), 13 * 9);
+        assert_eq!(sphere.indices.len(), (12 * 8 * 6) as usize);
+        for vertex in &sphere.vertices {
+            let normal = Vec3::from_array(vertex.normal);
+            assert!((normal.length() - 1.0).abs() < 1e-5);
+            let outward = (Vec3::from_array(vertex.position) - center).normalize();
+            assert!(normal.dot(outward) > 0.999);
+            assert!((0.0..=1.0).contains(&vertex.uv[0]));
+            assert!((0.0..=1.0).contains(&vertex.uv[1]));
+        }
+        // Enroulement CCW vu de l'extérieur (les triangles dégénérés des
+        // pôles, d'aire nulle, sont tolérés).
+        for triangle in sphere.indices.chunks(3) {
+            let [a, b, c] = [triangle[0], triangle[1], triangle[2]]
+                .map(|index| Vec3::from_array(sphere.vertices[usize::from(index)].position));
+            let normal = (b - a).cross(c - a);
+            if normal.length_squared() > 1e-9 {
+                let centroid = (a + b + c) / 3.0;
+                assert!(normal.dot(centroid - center) > 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_sphere_clamps_its_resolution() {
+        // Jamais d'écrasement u16 silencieux : la résolution est bornée
+        // à la construction, en bas comme en haut.
+        let tiny = LitGeometry::sphere([0.0; 3], 1.0, 0, 0);
+        assert_eq!(tiny.vertices.len(), 4 * 3);
+        let huge = LitGeometry::sphere([0.0; 3], 1.0, 10_000, 10_000);
+        assert_eq!(huge.vertices.len(), 255 * 255);
+        assert!(huge.vertices.len() <= usize::from(u16::MAX));
     }
 }

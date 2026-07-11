@@ -6,7 +6,7 @@ use crate::resources::{SamplerDescriptor, SamplerHandle};
 use crate::pool::PoolHandle;
 
 use super::WgpuBackend;
-use super::convert::{to_wgpu_address_mode, to_wgpu_filter_mode};
+use super::convert::{to_wgpu_address_mode, to_wgpu_filter_mode, to_wgpu_mipmap_filter_mode};
 
 impl WgpuBackend {
     pub(super) fn build_sampler(
@@ -24,6 +24,8 @@ impl WgpuBackend {
             address_mode_w: address_mode,
             mag_filter: filter,
             min_filter: filter,
+            mipmap_filter: to_wgpu_mipmap_filter_mode(descriptor.mip_filter),
+            anisotropy_clamp: descriptor.anisotropy,
             ..Default::default()
         });
 

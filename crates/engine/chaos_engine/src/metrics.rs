@@ -41,7 +41,8 @@ pub struct MetricsSnapshot {
     pub active_scenes: usize,
     /// Les ressources à l'état `Loaded`.
     pub loaded_assets: usize,
-    /// Les draws soumis cette frame (0 en headless — pas de renderer).
+    /// Les draws soumis cette frame, toutes passes de rendu confondues
+    /// (0 en headless — pas de renderer).
     pub draw_calls: usize,
     /// Les erreurs comptées par les chemins moteur (cumulatif).
     pub errors: u64,

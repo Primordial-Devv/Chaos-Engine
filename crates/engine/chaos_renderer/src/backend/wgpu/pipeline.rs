@@ -5,8 +5,8 @@ use crate::resources::{PipelineDescriptor, PipelineHandle, ShaderSource};
 
 use super::WgpuBackend;
 use super::convert::{
-    to_wgpu_cull_mode, to_wgpu_front_face, to_wgpu_step_mode, to_wgpu_topology,
-    to_wgpu_vertex_attributes,
+    to_wgpu_cull_mode, to_wgpu_depth_compare, to_wgpu_front_face, to_wgpu_step_mode,
+    to_wgpu_topology, to_wgpu_vertex_attributes,
 };
 use super::depth::DEPTH_FORMAT;
 
@@ -33,10 +33,20 @@ impl WgpuBackend {
                 source: wgpu::ShaderSource::Wgsl(source.as_str().into()),
             });
 
-        let mut bind_group_layouts = vec![
-            Some(&self.uniforms.frame_layout),
-            Some(&self.uniforms.object_layout),
-        ];
+        // La passe d'ombre binde le groupe(0) RÉDUIT (buffer frame seul) :
+        // son pipeline doit viser le MÊME layout — la compatibilité des
+        // bind groups est par slot, le groupe(1) objet reste le standard.
+        let mut bind_group_layouts = if descriptor.depth_only {
+            vec![
+                Some(&self.uniforms.shadow_frame_layout),
+                Some(&self.uniforms.object_layout),
+            ]
+        } else {
+            vec![
+                Some(&self.uniforms.frame_layout),
+                Some(&self.uniforms.object_layout),
+            ]
+        };
         if descriptor.material {
             bind_group_layouts.push(Some(&self.material_bindings.layout));
         }
@@ -48,18 +58,47 @@ impl WgpuBackend {
                 immediate_size: 0,
             });
 
+        // Deux slots de vertex buffers au plus : le mesh (slot 0), puis
+        // les données PAR INSTANCE (slot 1 — les permutations
+        // instanciées).
         let vertex_attributes = descriptor
             .vertex_layout
             .as_ref()
             .map(to_wgpu_vertex_attributes);
-        let vertex_buffers = match (&descriptor.vertex_layout, &vertex_attributes) {
-            (Some(layout), Some(attributes)) => vec![Some(wgpu::VertexBufferLayout {
+        let instance_attributes = descriptor
+            .instance_layout
+            .as_ref()
+            .map(to_wgpu_vertex_attributes);
+        let mut vertex_buffers = Vec::new();
+        if let (Some(layout), Some(attributes)) = (&descriptor.vertex_layout, &vertex_attributes) {
+            vertex_buffers.push(Some(wgpu::VertexBufferLayout {
                 array_stride: u64::from(layout.stride),
                 step_mode: to_wgpu_step_mode(layout.step_mode),
                 attributes,
-            })],
-            _ => Vec::new(),
-        };
+            }));
+        }
+        if let (Some(layout), Some(attributes)) =
+            (&descriptor.instance_layout, &instance_attributes)
+        {
+            vertex_buffers.push(Some(wgpu::VertexBufferLayout {
+                array_stride: u64::from(layout.stride),
+                step_mode: to_wgpu_step_mode(layout.step_mode),
+                attributes,
+            }));
+        }
+
+        let color_targets = [Some(wgpu::ColorTargetState {
+            format: descriptor
+                .color_target
+                .map(super::convert::to_wgpu_texture_format)
+                .unwrap_or(self.config.format),
+            blend: Some(if descriptor.transparent {
+                wgpu::BlendState::ALPHA_BLENDING
+            } else {
+                wgpu::BlendState::REPLACE
+            }),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
 
         let pipeline = self
             .device
@@ -80,22 +119,24 @@ impl WgpuBackend {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    depth_write_enabled: Some(!descriptor.transparent),
+                    depth_compare: Some(to_wgpu_depth_compare(descriptor.depth_compare)),
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(descriptor.fragment_entry.as_str()),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: self.config.format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
+                // Profondeur seule : aucun étage fragment, aucune cible
+                // couleur — le vertex shader suffit (les passes d'ombre).
+                fragment: if descriptor.depth_only {
+                    None
+                } else {
+                    Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some(descriptor.fragment_entry.as_str()),
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        targets: &color_targets,
+                    })
+                },
                 multiview_mask: None,
                 cache: None,
             });

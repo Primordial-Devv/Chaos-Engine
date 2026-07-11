@@ -1,37 +1,28 @@
 # Préparation du Lighting et du Material PBR — le plan d'accueil
 
-Rien de ce document n'est implémenté. C'est le **plan d'atterrissage vérifié** de Lighting V1 et de Material PBR dans l'architecture de Rendering Core V3 : chaque besoin futur est mappé sur son point d'accueil dans le code réel, avec ce qui changera (mécanique) et ce qui ne changera pas (les invariants). Ces phases suivront cette carte — aucune refonte n'est nécessaire.
+**Lighting V1 a ATTERRI (consolidation, sous-phase 7) en suivant cette carte, sans refonte** — les quatre premières lignes sont réalisées telles qu'écrites : `LitVertex`, `FRAME_LIGHTS_BINDING` au groupe(0), le buffer de lumières uniform (16 max), `ObjectUniforms` 64 → 128 (normal matrix). Le PBR a suivi (sous-phase 8), puis les environment maps (sous-phase 9), puis les OMBRES (sous-phase 10) — la carte est intégralement réalisée.
 
 ## La carte d'atterrissage
 
-| Besoin Lighting V1 | Point d'atterrissage | Ce qui existe déjà | Ce qui changera (mécanique, pas refonte) |
-|---|---|---|---|
-| **Normales** | attribut de vertex | `VertexAttributeFormat::Float32x3`, `VertexLayout::packed` ; deux vertex standard (`ColorVertex`, `TexturedVertex`) prouvent l'extension ; les constructeurs `cube` calculent déjà la normale de chaque face (jetée aujourd'hui) | `LitVertex { position, normal, uv }` = troisième vertex standard, ou unification des géométries (déjà notée pour l'asset pipeline) |
-| **Light uniforms** | `@group(0)` — fréquence frame | la convention `shaders::inputs` est l'autorité unique extensible ; le verrou naga grandit avec elle | `FrameUniforms` s'étend (position caméra pour le spéculaire) ; `LIGHTS_BINDING` s'ajoute aux constantes ; `Uniforms` (backend) gagne une entrée de layout |
-| **Light buffers** (N lumières) | même groupe, buffer dédié | `BindingType::Buffer` uniform en place ; le passage aux storage buffers est une extension wgpu triviale | `set_view_projection` évoluera vers un état de frame plus riche — `FramePlan` porte déjà le « quoi » de la frame |
-| **Normal matrix** | `@group(1)` — par objet | slots d'objet génériques réutilisés par index, `mat4_to_bytes`, `Transform::matrix()` + `Mat4::inverse` dans le choke point `chaos_core::math` | `ObjectUniforms` 64 → 128 octets (une constante + le write path) |
-| **Shadow maps** | render-to-texture, compare sampler, pré-passes | `TextureUsage::RenderTarget` dans le vocabulaire ; `SamplerDescriptor.compare` noté extension depuis V3.5 ; la passe (`chaos.main_pass`) est un détail backend invisible de l'abstraction | format profondeur-cible dans `TextureFormat`, variante compare du sampler, `FramePlan` gagne des passes — le trait `GraphicsBackend::render(&FramePlan)` survit |
-| **Environment maps** | cubemap au groupe frame ou material | extension kind/couches du `TextureDescriptor` notée depuis V3.1 ; `TextureDescriptor::validate()` est le point d'ancrage des règles (6 faces) | variante de vue cubemap côté backend, binding dédié dans `inputs` |
+| Besoin Lighting V1 | Point d'atterrissage | État |
+|---|---|---|
+| **Normales** | attribut de vertex | ✅ ATTERRI — `LitVertex { position, normal, uv }` (stride 32), `LitGeometry` (les constructeurs cube ont cessé de jeter leurs normales de face), chaîne d'assets complète (glTF `NORMAL` optionnel, synthèse plate à la couture `lit_geometry`) |
+| **Light uniforms** | `@group(0)` — fréquence frame | ✅ ATTERRI — `FRAME_LIGHTS_BINDING = 1`, le verrou naga étendu ; la position caméra (spéculaire) reste pour le PBR |
+| **Light buffers** (N lumières) | même groupe, buffer dédié | ✅ ATTERRI — uniform 1 056 o, `MAX_LIGHTS = 16`, troncature prévisible ; le passage aux storage buffers reste l'extension notée |
+| **Normal matrix** | `@group(1)` — par objet | ✅ ATTERRI — `chaos_core::math::normal_matrix` (inverse-transposée, singulier → identité), `ObjectUniforms` 128 octets |
+| **Shadow maps** | render-to-texture, compare sampler, pré-passes | ✅ ATTERRI (sous-phase 10) — en BACKEND-INTERNE, conformément à l'invariant 4 ci-dessous (le croquis initial « format profondeur public + passe déclarée » a cédé à son propre principe : la map, le sampler de comparaison et la passe d'ombre sont des organes internes, comme la profondeur l'a été en V2.6) : `FramePlan.shadow` dérivée par le renderer, `GraphicsBackend::set_shadow`, bindings 4–5 du groupe frame, `LightsUniforms` 1 056 → 1 136 (queue ombre) | |
+| **Environment maps** | cubemap au groupe frame | ✅ ATTERRI (sous-phase 9) — la vue Cube côté backend, les bindings 2–3 du groupe frame dans `inputs`, le cube fallback noir interne, `set_environment`/`clear_environment`, le ciel `chaos.sky` et l'IBL V1 dans `chaos.pbr` | |
 | **Paramètres PBR** (metallic, roughness…) | `MaterialUniforms` | le buffer material existe (binding 2 du groupe material), le descripteur a ses builders | 16 octets → la taille nécessaire (une constante backend + champs `with_*` du descripteur) |
 
-## Material PBR — le plan d'évolution
+## Material PBR — ATTERRI (consolidation, sous-phase 8)
 
-Material V1 (pipeline + base_color + texture/sampler optionnels) évolue vers le material PBR **par addition**, jamais par rupture :
+**Le plan a été suivi à la lettre, par addition** : `MaterialModel::Pbr` + builtin `chaos.pbr` (Cook-Torrance GGX, layout `LitVertex`, tangentes dérivées à l'écran) ; `MaterialUniforms` 16 → 48 octets (base_color + metallic/roughness + émissif) mis à jour in-place (`set_material_metallic`/`roughness`/`emissive`) ; le groupe(2) élargi en **7 slots fixes toujours remplis** (base, sampler, uniforms, metallic-roughness, normal map, occlusion, émissif — fallbacks `chaos.white`/`chaos.normal_flat`) ; les shaders existants ont survécu au layout élargi comme promis ; `MaterialHandle` et le triplet `DrawCommand` intacts ; les conventions sRGB/linéaire et le packing glTF documentés dans la section « Le matériau PBR » d'overview.md. La position caméra (spéculaire) est entrée dans `FrameUniforms` (80 octets).
 
-| Besoin PBR | État / évolution |
+| Besoin PBR | État |
 |---|---|
-| **Base color** | ✅ existe — `MaterialUniforms.base_color`, `with_base_color()` |
-| **Metallic / Roughness** (scalaires) | `MaterialUniforms` 16 → 32 octets (une constante backend + `with_metallic`/`with_roughness`) — cartographié dans la table lighting ci-dessus |
-| **Normal map / AO / Emissive** (textures) | le layout du groupe(2) grandit en **slots fixes toujours remplis** : le patron fallback prouvé s'étend — `chaos.white` (albedo/AO neutres, existe), `chaos.normal` (normale plate `(128, 128, 255)`, linéaire), `chaos.black` (émissif éteint), tous servis par le cache de textures avec leurs clés prêtes. Descripteur additif : `with_normal_map`/`with_ao`/`with_emissive` |
-| **Emissive couleur** | paramètre `MaterialUniforms` + texture optionnelle, même patron que base_color |
-| **IBL** | environment maps (table lighting) + BRDF LUT = texture 2D standard, rien de nouveau |
-
-Les deux garanties de non-blocage, vérifiées :
-
-1. **Slots fixes toujours remplis** : chaque texture PBR optionnelle a son fallback neutre — un material minimal (couleur seule) reste un bind group complet et valide, exactement comme aujourd'hui avec `chaos.white`.
-2. **Les shaders existants survivent au layout élargi** : en WGSL/wgpu, un shader qui ne déclare pas un binding présent dans le layout reste valide — `chaos.textured` fonctionnera sans modification sous le layout PBR. Le PBR sera un nouveau builtin (`chaos.pbr`), accueilli par la `ShaderLibrary` et le verrou naga des conventions.
-
-Ce qui reste stable : `MaterialHandle`, le triplet `DrawCommand { mesh, material, transform }`, `create_material` pour tout le contenu existant. La règle sRGB est déjà verrouillée pour le PBR : albedo/emissive en sRGB, normal/metallic-roughness/AO en linéaire — le vocabulaire `TextureFormat` couvre les deux familles depuis V3.1. La mise à jour live des paramètres (tuning) viendra avec ses besoins réels.
+| Modèles éclairés, base color, metallic/roughness, normal map, AO, émissif | ✅ ATTERRIS |
+| **IBL** | ✅ ATTERRIE (sous-phase 9) — cubemap d'environnement au groupe frame, mips box + BRDF analytique de Karis (approximations V1 documentées) ; RESTENT le préfiltre GGX et la BRDF LUT |
+| **Import des materials glTF** | RESTE — attend les décodeurs d'images (PNG/JPEG) ; les conventions sont déjà alignées |
 
 ## Les invariants qui garantissent « sans refonte »
 

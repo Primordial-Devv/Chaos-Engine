@@ -39,10 +39,17 @@ pub use chaos_core::{
 };
 pub use chaos_ecs::{Commands, Component, Message, Resource, Schedule, System, Systems, World};
 pub use chaos_renderer::{
-    ColorVertex, CullMode, DrawCommand, Geometry, MaterialDescriptor, MaterialHandle, MeshHandle,
-    PipelineDescriptor, PipelineHandle, Renderer, SamplerAddressMode, SamplerDescriptor,
-    SamplerFilter, SamplerHandle, ShaderSource, TextureDescriptor, TextureFormat, TextureHandle,
-    TextureUsage, TexturedGeometry, TexturedVertex, VertexAttributeFormat, VertexLayout, shaders,
+    BuiltinTexture, CapabilityDecision, CapabilityStatus, ColorVertex, CullMode, DebugDepth,
+    DebugDraw, DebugShape, DebugStats, DeviceLimits, DirectionalShadowDescriptor,
+    DirectionalShadowInfo, DrawBreakdown, DrawCommand, EnvironmentDescriptor, EnvironmentInfo,
+    FrameReport, Geometry, GpuTiming, KindStats, Light, LitGeometry, LitVertex, MAX_LIGHTS,
+    MaterialDescriptor, MaterialHandle, MaterialInfo, MaterialModel, MaterialOpacity, MeshHandle,
+    PassHandle, PassLoad, PassOutcome, PassReport, RenderDestination, RenderPassDescriptor,
+    RenderTargetDescriptor, RenderTargetHandle, Renderer, RendererCapabilities,
+    RendererDiagnostics, ResourceStats, SamplerAddressMode, SamplerDescriptor, SamplerFilter,
+    SamplerHandle, ShaderSource, ShadowReport, ShadowVolume, TextureDescriptor, TextureFormat,
+    TextureHandle, TextureKind, TextureMips, TextureUsage, TexturedGeometry, TexturedVertex,
+    VertexAttributeFormat, VertexLayout, light_view_projection, rgba16f_bytes_of, shaders,
     srgb8_bytes_of,
 };
 pub use chaos_scene::{

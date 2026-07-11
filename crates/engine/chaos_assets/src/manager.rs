@@ -663,6 +663,7 @@ mod tests {
         fn import(&self, _name: &str, _bytes: &[u8]) -> ChaosResult<ImportedAsset> {
             Ok(ImportedAsset::Mesh(crate::import::MeshData {
                 positions: vec![[0.0, 0.0, 0.0]],
+                normals: Vec::new(),
                 uvs: vec![[0.0, 0.0]],
                 indices: vec![0, 1, 2],
             }))
